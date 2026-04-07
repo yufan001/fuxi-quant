@@ -1,8 +1,9 @@
+const V = '?v=2';
 const routes = {
-    '/platform': () => import('./pages/platform.js'),
-    '/backtest': () => import('./pages/backtest.js'),
-    '/data': () => import('./pages/data.js'),
-    '/ops': () => import('./pages/ops.js'),
+    '/platform': () => import('./pages/platform.js' + V),
+    '/backtest': () => import('./pages/backtest.js' + V),
+    '/data': () => import('./pages/data.js' + V),
+    '/ops': () => import('./pages/ops.js' + V),
 };
 
 let currentModule = null;
