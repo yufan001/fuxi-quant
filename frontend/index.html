@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>量化交易系统</title>
-    <link rel="stylesheet" href="/static/style.css?v=2">
+    <link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
     <nav id="nav">
@@ -15,8 +15,11 @@
             <a href="#/data" class="nav-link" data-page="data">数据管理</a>
             <a href="#/ops" class="nav-link" data-page="ops">运维</a>
         </div>
+        <div style="margin-left:auto;">
+            <button class="btn" id="btnLogout" style="font-size:11px;padding:4px 10px;" onclick="localStorage.removeItem('lianghua_token');location.hash='#/login';">退出</button>
+        </div>
     </nav>
     <main id="app"></main>
-    <script type="module" src="/modules/app.js?v=2"></script>
+    <script type="module" src="/modules/app.js?v=3"></script>
 </body>
 </html>

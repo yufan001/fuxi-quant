@@ -34,35 +34,42 @@ function addSearchHistory(code, name) {
 
 export async function render(container) {
     container.innerHTML = `
-        <div class="platform-layout">
-            <div class="search-bar">
-                <div class="search-wrapper">
-                    <input type="text" class="search-input" id="stockSearch"
-                           placeholder="输入代码或名称搜索..." autocomplete="off">
-                    <div class="search-dropdown" id="searchDropdown"></div>
+        <div style="display:grid;grid-template-columns:1fr 220px;gap:12px;height:100%;">
+            <div class="platform-layout">
+                <div class="search-bar">
+                    <div class="search-wrapper">
+                        <input type="text" class="search-input" id="stockSearch"
+                               placeholder="输入代码或名称搜索..." autocomplete="off">
+                        <div class="search-dropdown" id="searchDropdown"></div>
+                    </div>
+                    <button class="btn" id="btnFavorite" title="加入自选">&#9734;</button>
+                    <span class="stock-name" id="stockName">${currentName}</span>
+                    <span class="stock-code" id="stockCode">${currentCode}</span>
+                    <span class="stock-price" id="stockPrice">--</span>
+                    <span class="stock-change" id="stockChange"></span>
+                    <div style="margin-left:auto;display:flex;gap:4px;" id="maLegend">
+                        ${MA_CONFIG.map(m => `<span class="ma-legend" style="color:${m.color};">${m.label}</span>`).join('')}
+                    </div>
                 </div>
-                <button class="btn" id="btnFavorite" title="加入自选">&#9734;</button>
-                <span class="stock-name" id="stockName">${currentName}</span>
-                <span class="stock-code" id="stockCode">${currentCode}</span>
-                <span class="stock-price" id="stockPrice">--</span>
-                <span class="stock-change" id="stockChange"></span>
-                <div style="margin-left:auto;display:flex;gap:4px;" id="maLegend">
-                    ${MA_CONFIG.map(m => `<span class="ma-legend" style="color:${m.color};">${m.label}</span>`).join('')}
-                </div>
+                <div class="chart-container" id="chartContainer"></div>
+                <div class="info-bar" id="infoBar"></div>
             </div>
-            <div class="chart-container" id="chartContainer"></div>
-            <div style="display:flex;gap:12px;">
-                <div style="flex:1;">
-                    <div class="info-bar" id="infoBar"></div>
+            <div class="watchlist-panel" id="watchlistPanel">
+                <div class="watchlist-header">
+                    <span style="font-weight:600;font-size:13px;">自选股</span>
+                    <button class="btn" id="btnAddCurrent" title="添加当前" style="padding:2px 6px;font-size:11px;">+ 添加</button>
                 </div>
-                <div id="favoritesPanel" class="favorites-panel"></div>
+                <div class="watchlist-list" id="watchlistList"></div>
             </div>
         </div>
     `;
 
     setupSearch();
     setupFavoriteButton();
-    renderFavoritesPanel();
+    document.getElementById('btnAddCurrent').addEventListener('click', () => {
+        addFavorite(currentCode, currentName);
+    });
+    renderWatchlist();
     await initChart();
     await loadStock(currentCode);
 }
@@ -168,28 +175,82 @@ function updateFavoriteButton() {
     btn.style.color = isFav ? '#f59e0b' : 'var(--text-muted)';
 }
 
-function renderFavoritesPanel() {
-    const panel = document.getElementById('favoritesPanel');
+function addFavorite(code, name) {
+    let favs = getFavorites();
+    if (!favs.find(f => f.code === code)) {
+        favs.push({ code, name });
+        saveFavorites(favs);
+        updateFavoriteButton();
+        renderWatchlist();
+    }
+}
+
+function renderWatchlist() {
+    const list = document.getElementById('watchlistList');
     const favs = getFavorites();
     if (favs.length === 0) {
-        panel.innerHTML = '';
+        list.innerHTML = '<div style="text-align:center;padding:40px 0;color:var(--text-muted);font-size:12px;">暂无自选股<br>搜索并添加股票</div>';
         return;
     }
-    panel.innerHTML = `
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">自选股</div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap;">
-            ${favs.map(f => `
-                <span class="fav-chip" data-code="${f.code}" data-name="${f.name}"
-                      style="cursor:pointer;padding:2px 8px;border-radius:4px;font-size:11px;
-                      background:var(--bg-secondary);border:1px solid var(--border);
-                      ${f.code === currentCode ? 'border-color:var(--accent);color:var(--accent);' : 'color:var(--text-secondary);'}"
-                >${f.name || f.code}</span>
-            `).join('')}
+    list.innerHTML = favs.map(f => `
+        <div class="watchlist-item ${f.code === currentCode ? 'active' : ''}" data-code="${f.code}" data-name="${f.name}">
+            <div class="watchlist-item-main">
+                <div class="watchlist-name">${f.name || f.code}</div>
+                <div class="watchlist-code">${f.code}</div>
+            </div>
+            <div class="watchlist-item-price" id="wp_${f.code.replace('.', '_')}">
+                <div class="watchlist-price">--</div>
+                <div class="watchlist-change">--</div>
+            </div>
+            <button class="watchlist-remove" data-code="${f.code}" title="移除">&times;</button>
         </div>
-    `;
-    panel.querySelectorAll('.fav-chip').forEach(chip => {
-        chip.addEventListener('click', () => switchStock(chip.dataset.code, chip.dataset.name));
+    `).join('');
+
+    list.querySelectorAll('.watchlist-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            if (e.target.classList.contains('watchlist-remove')) return;
+            switchStock(item.dataset.code, item.dataset.name);
+            renderWatchlist();
+        });
     });
+
+    list.querySelectorAll('.watchlist-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            let favs = getFavorites();
+            favs = favs.filter(f => f.code !== btn.dataset.code);
+            saveFavorites(favs);
+            updateFavoriteButton();
+            renderWatchlist();
+        });
+    });
+
+    // Load prices for watchlist items
+    loadWatchlistPrices(favs);
+}
+
+async function loadWatchlistPrices(favs) {
+    for (const f of favs) {
+        try {
+            const resp = await getKline(f.code);
+            const data = resp.data || [];
+            if (data.length >= 2) {
+                const last = data[data.length - 1];
+                const prev = data[data.length - 2];
+                const change = last.close - prev.close;
+                const changePct = prev.close ? (change / prev.close * 100) : 0;
+                const cls = change >= 0 ? 'price-up' : 'price-down';
+                const sign = change >= 0 ? '+' : '';
+                const el = document.getElementById(`wp_${f.code.replace('.', '_')}`);
+                if (el) {
+                    el.innerHTML = `
+                        <div class="watchlist-price ${cls}">${last.close.toFixed(2)}</div>
+                        <div class="watchlist-change ${cls}">${sign}${changePct.toFixed(2)}%</div>
+                    `;
+                }
+            }
+        } catch {}
+    }
 }
 
 async function initChart() {

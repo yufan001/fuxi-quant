@@ -3,17 +3,20 @@ from fastapi import FastAPI, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import FRONTEND_DIR, HOST, PORT
+from app.core.auth import AuthMiddleware
 from app.models.db import init_market_db
 from app.api.market import router as market_router
 from app.api.backtest import router as backtest_router
 from app.api.monitor import router as monitor_router
 from app.api.strategy import router as strategy_router
 from app.api.trading import router as trading_router
+from app.api.auth import router as auth_router
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="量化交易系统", version="0.1.0")
 
+    app.add_middleware(AuthMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -21,6 +24,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
     app.include_router(market_router, prefix="/api/market", tags=["market"])
     app.include_router(backtest_router, prefix="/api/backtest", tags=["backtest"])
     app.include_router(monitor_router, prefix="/api/monitor", tags=["monitor"])
