@@ -1,146 +1,337 @@
+let currentTab = 'strategy-lib';
+
 export async function render(container) {
     container.innerHTML = `
-        <div class="backtest-layout">
-            <div class="backtest-sidebar">
-                <div class="card">
-                    <div class="card-title">策略配置</div>
-                    <div class="form-group">
-                        <label class="form-label">策略</label>
-                        <select class="form-select" id="strategySelect">
-                            <option value="ma_cross">均线交叉</option>
-                            <option value="macd">MACD</option>
-                            <option value="rsi">RSI</option>
-                            <option value="bollinger">布林带突破</option>
-                            <option value="platform_breakout">强势平台启动</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">股票代码</label>
-                        <input class="form-input" id="btCode" value="sh.600000">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">开始日期</label>
-                        <input class="form-input" type="date" id="btStart" value="2023-01-01">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">结束日期</label>
-                        <input class="form-input" type="date" id="btEnd" value="2024-12-31">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">初始资金</label>
-                        <input class="form-input" id="btCapital" value="100000">
-                    </div>
-                    <div id="strategyParams"></div>
-                    <button class="btn btn-primary" id="btnRunBacktest" style="width: 100%; margin-top: 8px;">
-                        运行回测
-                    </button>
-                    <div id="btProgress" style="margin-top: 8px;"></div>
+        <div style="display:flex;flex-direction:column;height:100%;">
+            <div class="backtest-tabs">
+                <div class="tab active" data-tab="strategy-lib">策略库<span class="tab-sub">管理所有策略</span></div>
+                <div class="tab" data-tab="strategy-verify">策略验证<span class="tab-sub">回测分析</span></div>
+            </div>
+            <div id="tabContent" style="flex:1;overflow:auto;"></div>
+        </div>
+    `;
+
+    container.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            container.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            currentTab = tab.dataset.tab;
+            renderTab(document.getElementById('tabContent'));
+        });
+    });
+
+    renderTab(document.getElementById('tabContent'));
+}
+
+async function renderTab(container) {
+    if (currentTab === 'strategy-lib') {
+        await renderStrategyLib(container);
+    } else {
+        await renderStrategyVerify(container);
+    }
+}
+
+// ===== Strategy Library =====
+async function renderStrategyLib(container) {
+    container.innerHTML = '<div style="padding:20px;color:var(--text-muted)">加载中...</div>';
+    try {
+        const resp = await fetch('/api/strategy/list');
+        const data = await resp.json();
+        const strategies = data.data || [];
+
+        container.innerHTML = `
+            <div style="padding:8px 0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <div style="font-size:13px;color:var(--text-secondary);">共 ${strategies.length} 个策略</div>
+                    <button class="btn btn-primary" id="btnAddStrategy">+ 新建策略</button>
+                </div>
+                <div class="strategy-grid" id="strategyGrid">
+                    ${strategies.map(s => renderStrategyCard(s)).join('')}
                 </div>
             </div>
-            <div class="backtest-results" id="btResults">
-                <div class="card" style="text-align: center; color: var(--text-muted); padding: 60px;">
-                    选择策略并运行回测查看结果
+            <div id="strategyModal" style="display:none;"></div>
+        `;
+
+        document.getElementById('btnAddStrategy').addEventListener('click', () => showStrategyModal());
+
+        container.querySelectorAll('.strategy-card').forEach(card => {
+            card.querySelector('.btn-edit')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const sid = card.dataset.id;
+                const s = strategies.find(x => x.id === sid);
+                if (s) showStrategyModal(s);
+            });
+            card.querySelector('.btn-delete')?.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const sid = card.dataset.id;
+                if (confirm('确定删除此策略？')) {
+                    await fetch(`/api/strategy/${sid}`, { method: 'DELETE' });
+                    await renderStrategyLib(container);
+                }
+            });
+            card.querySelector('.btn-verify')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const sid = card.dataset.id;
+                // Switch to verify tab with this strategy pre-selected
+                document.querySelector('.tab[data-tab="strategy-verify"]').click();
+                setTimeout(() => {
+                    const sel = document.getElementById('pipelineStrategy');
+                    if (sel) sel.value = sid;
+                }, 100);
+            });
+        });
+    } catch (e) {
+        container.innerHTML = `<div class="badge badge-error">加载失败: ${e.message}</div>`;
+    }
+}
+
+function renderStrategyCard(s) {
+    const typeLabels = { tech: '技术指标', pattern: '形态识别', ml: 'AI/ML', custom: '自定义' };
+    const typeColors = { tech: '#3b82f6', pattern: '#a855f7', ml: '#f59e0b', custom: '#22c55e' };
+    const color = typeColors[s.type] || '#64748b';
+    const label = typeLabels[s.type] || s.type;
+
+    return `
+        <div class="strategy-card card" data-id="${s.id}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div>
+                    <span style="display:inline-block;padding:2px 6px;border-radius:3px;font-size:10px;background:${color}20;color:${color};margin-bottom:6px;">${label}</span>
+                    ${s.builtin ? '<span style="display:inline-block;padding:2px 6px;border-radius:3px;font-size:10px;background:rgba(100,116,139,0.2);color:#94a3b8;margin-left:4px;">内置</span>' : ''}
+                    <div style="font-size:15px;font-weight:600;margin-top:4px;">${s.name}</div>
+                </div>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin:8px 0;min-height:32px;">${s.description || '暂无描述'}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+                参数: ${Object.entries(s.params || {}).map(([k, v]) => `${k}=${v}`).join(', ') || '无'}
+            </div>
+            <div style="display:flex;gap:6px;">
+                <button class="btn btn-verify" style="flex:1;">验证</button>
+                ${!s.builtin ? '<button class="btn btn-edit">编辑</button><button class="btn btn-delete" style="color:var(--red);">删除</button>' : ''}
+            </div>
+        </div>
+    `;
+}
+
+function showStrategyModal(existing = null) {
+    const modal = document.getElementById('strategyModal');
+    const isEdit = !!existing;
+    modal.style.display = 'block';
+    modal.innerHTML = `
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;display:flex;align-items:center;justify-content:center;">
+            <div class="card" style="width:480px;max-height:80vh;overflow:auto;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <div class="card-title" style="margin:0;">${isEdit ? '编辑策略' : '新建策略'}</div>
+                    <button class="btn" id="btnCloseModal" style="padding:2px 8px;">&times;</button>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">策略名称</label>
+                    <input class="form-input" id="modalName" value="${existing?.name || ''}">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">类型</label>
+                    <select class="form-select" id="modalType">
+                        <option value="tech" ${existing?.type === 'tech' ? 'selected' : ''}>技术指标</option>
+                        <option value="pattern" ${existing?.type === 'pattern' ? 'selected' : ''}>形态识别</option>
+                        <option value="ml" ${existing?.type === 'ml' ? 'selected' : ''}>AI/ML</option>
+                        <option value="custom" ${!existing || existing?.type === 'custom' ? 'selected' : ''}>自定义</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">描述</label>
+                    <input class="form-input" id="modalDesc" value="${existing?.description || ''}">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">参数 (JSON)</label>
+                    <textarea class="form-input" id="modalParams" rows="3" style="font-family:var(--font-mono);font-size:12px;">${JSON.stringify(existing?.params || {}, null, 2)}</textarea>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                    <button class="btn" id="btnCancelModal">取消</button>
+                    <button class="btn btn-primary" id="btnSaveModal">${isEdit ? '保存' : '创建'}</button>
                 </div>
             </div>
         </div>
     `;
 
-    setupStrategyParams();
-    document.getElementById('strategySelect').addEventListener('change', setupStrategyParams);
-    document.getElementById('btnRunBacktest').addEventListener('click', runBacktest);
+    document.getElementById('btnCloseModal').addEventListener('click', () => modal.style.display = 'none');
+    document.getElementById('btnCancelModal').addEventListener('click', () => modal.style.display = 'none');
+    document.getElementById('btnSaveModal').addEventListener('click', async () => {
+        const body = {
+            name: document.getElementById('modalName').value,
+            type: document.getElementById('modalType').value,
+            description: document.getElementById('modalDesc').value,
+            params: JSON.parse(document.getElementById('modalParams').value || '{}'),
+        };
+        if (isEdit) {
+            await fetch(`/api/strategy/${existing.id}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+        } else {
+            await fetch('/api/strategy/create', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+        }
+        modal.style.display = 'none';
+        await renderStrategyLib(document.getElementById('tabContent'));
+    });
 }
 
-function setupStrategyParams() {
-    const strategy = document.getElementById('strategySelect').value;
-    const container = document.getElementById('strategyParams');
+// ===== Strategy Verification Pipeline =====
+async function renderStrategyVerify(container) {
+    const resp = await fetch('/api/strategy/list');
+    const strategies = (await resp.json()).data || [];
 
-    const params = {
-        ma_cross: `
-            <div class="form-group"><label class="form-label">短期均线</label>
-            <input class="form-input" id="param_short" value="5"></div>
-            <div class="form-group"><label class="form-label">长期均线</label>
-            <input class="form-input" id="param_long" value="20"></div>`,
-        macd: `
-            <div class="form-group"><label class="form-label">快线</label>
-            <input class="form-input" id="param_fast" value="12"></div>
-            <div class="form-group"><label class="form-label">慢线</label>
-            <input class="form-input" id="param_slow" value="26"></div>
-            <div class="form-group"><label class="form-label">信号线</label>
-            <input class="form-input" id="param_signal" value="9"></div>`,
-        rsi: `
-            <div class="form-group"><label class="form-label">RSI周期</label>
-            <input class="form-input" id="param_period" value="14"></div>
-            <div class="form-group"><label class="form-label">超买线</label>
-            <input class="form-input" id="param_overbought" value="70"></div>
-            <div class="form-group"><label class="form-label">超卖线</label>
-            <input class="form-input" id="param_oversold" value="30"></div>`,
-        bollinger: `
-            <div class="form-group"><label class="form-label">周期</label>
-            <input class="form-input" id="param_period" value="20"></div>
-            <div class="form-group"><label class="form-label">标准差倍数</label>
-            <input class="form-input" id="param_std" value="2"></div>`,
-        platform_breakout: `
-            <div class="form-group"><label class="form-label">整理天数</label>
-            <input class="form-input" id="param_days" value="20"></div>
-            <div class="form-group"><label class="form-label">振幅阈值(%)</label>
-            <input class="form-input" id="param_amplitude" value="10"></div>`,
-    };
+    container.innerHTML = `
+        <div class="pipeline-layout">
+            <div class="pipeline-sidebar">
+                <div class="card" style="margin-bottom:12px;">
+                    <div class="card-title">基础配置</div>
+                    <div class="form-group">
+                        <label class="form-label">模式</label>
+                        <div style="display:flex;gap:4px;">
+                            <button class="btn btn-primary btn-sm mode-btn active" data-mode="single">单策略</button>
+                            <button class="btn btn-sm mode-btn" data-mode="batch">批量</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">策略</label>
+                        <select class="form-select" id="pipelineStrategy">
+                            ${strategies.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">股票代码</label>
+                        <input class="form-input" id="pCode" value="sh.600000">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">回测区间</label>
+                        <div style="display:flex;gap:6px;">
+                            <input class="form-input" type="date" id="pStart" value="2023-01-01" style="flex:1;">
+                            <input class="form-input" type="date" id="pEnd" value="2024-12-31" style="flex:1;">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">初始资金</label>
+                        <input class="form-input" id="pCapital" value="100000">
+                    </div>
+                </div>
 
-    container.innerHTML = params[strategy] || '';
-}
+                <div class="pipeline-steps">
+                    <div class="pipeline-step" data-step="1" id="step1">
+                        <div class="step-header">
+                            <span class="step-num">1</span>
+                            <span class="step-title">回测分析</span>
+                            <span class="step-status" id="step1Status"></span>
+                        </div>
+                        <button class="btn btn-primary" id="btnRunBacktest" style="width:100%;margin-top:8px;">运行</button>
+                    </div>
 
-async function runBacktest() {
-    const results = document.getElementById('btResults');
-    const progress = document.getElementById('btProgress');
+                    <div class="pipeline-step" data-step="2" id="step2">
+                        <div class="step-header">
+                            <span class="step-num">2</span>
+                            <span class="step-title">参数敏感性</span>
+                            <span class="step-status" id="step2Status"></span>
+                        </div>
+                        <div class="form-group" style="margin-top:6px;">
+                            <label class="form-label">扫描窗口</label>
+                            <div style="display:flex;gap:4px;">
+                                <button class="btn btn-sm scan-btn active" data-range="narrow">窄</button>
+                                <button class="btn btn-sm scan-btn" data-range="medium">中</button>
+                                <button class="btn btn-sm scan-btn" data-range="wide">宽</button>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" id="btnRunSensitivity" style="width:100%;margin-top:6px;">运行</button>
+                    </div>
 
-    progress.innerHTML = `
-        <div class="progress-bar"><div class="progress-fill" style="width: 0%"></div></div>
-        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">回测运行中...</div>
+                    <div class="pipeline-step" data-step="3" id="step3">
+                        <div class="step-header">
+                            <span class="step-num">3</span>
+                            <span class="step-title">Walk-Forward</span>
+                            <span class="step-status" id="step3Status"></span>
+                        </div>
+                        <div class="form-group" style="margin-top:6px;">
+                            <label class="form-label">折数</label>
+                            <input class="form-input" id="pFolds" value="5" style="width:60px;">
+                        </div>
+                        <button class="btn btn-primary" id="btnRunWalkForward" style="width:100%;margin-top:6px;">运行</button>
+                    </div>
+
+                    <div class="pipeline-step" data-step="4" id="step4">
+                        <div class="step-header">
+                            <span class="step-num">4</span>
+                            <span class="step-title">总结</span>
+                            <span class="step-status" id="step4Status"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pipeline-results" id="pipelineResults">
+                <div class="card" style="text-align:center;color:var(--text-muted);padding:60px;">
+                    选择策略并运行回测分析流水线
+                </div>
+            </div>
+        </div>
     `;
 
-    // Simulate progress for now (will be replaced with WebSocket)
-    let pct = 0;
-    const interval = setInterval(() => {
-        pct = Math.min(pct + Math.random() * 15, 95);
-        progress.querySelector('.progress-fill').style.width = pct + '%';
-    }, 200);
+    // Mode buttons
+    container.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            container.querySelectorAll('.mode-btn').forEach(b => { b.classList.remove('active'); b.classList.remove('btn-primary'); b.classList.add('btn'); });
+            btn.classList.add('active', 'btn-primary');
+        });
+    });
+
+    // Scan range buttons
+    container.querySelectorAll('.scan-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            container.querySelectorAll('.scan-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+
+    // Step 1: Backtest
+    document.getElementById('btnRunBacktest').addEventListener('click', () => runPipelineBacktest());
+    // Step 2: Sensitivity
+    document.getElementById('btnRunSensitivity').addEventListener('click', () => runSensitivityAnalysis());
+    // Step 3: Walk-Forward
+    document.getElementById('btnRunWalkForward').addEventListener('click', () => runWalkForward());
+}
+
+async function runPipelineBacktest() {
+    const status = document.getElementById('step1Status');
+    status.innerHTML = '<span class="badge badge-warning">运行中</span>';
+
+    const config = {
+        strategy: document.getElementById('pipelineStrategy').value,
+        code: document.getElementById('pCode').value,
+        start_date: document.getElementById('pStart').value,
+        end_date: document.getElementById('pEnd').value,
+        capital: parseFloat(document.getElementById('pCapital').value),
+    };
 
     try {
-        const config = {
-            strategy: document.getElementById('strategySelect').value,
-            code: document.getElementById('btCode').value,
-            start_date: document.getElementById('btStart').value,
-            end_date: document.getElementById('btEnd').value,
-            capital: parseFloat(document.getElementById('btCapital').value),
-        };
-
         const resp = await fetch('/api/backtest/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config),
         });
-
-        clearInterval(interval);
-
-        if (!resp.ok) throw new Error('回测请求失败');
-
         const data = await resp.json();
-        progress.innerHTML = '<span class="badge badge-success">回测完成</span>';
-        displayResults(data.data, results);
+        if (data.error) throw new Error(data.error);
+
+        status.innerHTML = '<span class="badge badge-success">完成</span>';
+        displayPipelineResults(data.data);
     } catch (e) {
-        clearInterval(interval);
-        progress.innerHTML = `<span class="badge badge-error">回测失败: ${e.message}</span>`;
+        status.innerHTML = `<span class="badge badge-error">失败</span>`;
     }
 }
 
-function displayResults(data, container) {
-    if (!data) {
-        container.innerHTML = '<div class="card"><span class="badge badge-error">无回测结果</span></div>';
-        return;
-    }
-
+async function displayPipelineResults(data) {
+    const container = document.getElementById('pipelineResults');
     const m = data.metrics || {};
     const trades = data.trades || [];
+    const curve = data.equity_curve || [];
 
     const upDown = (v, suffix = '%') => {
         const cls = v >= 0 ? 'price-up' : 'price-down';
@@ -149,108 +340,308 @@ function displayResults(data, container) {
     };
 
     container.innerHTML = `
-        <div class="metrics-grid">
-            <div class="metric-card">
-                <div class="metric-value">${upDown(m.total_return || 0)}</div>
-                <div class="metric-label">总收益率</div>
+        <div class="pipeline-section">
+            <div class="section-header">
+                <span class="step-num">1</span>
+                <span>回测分析</span>
             </div>
-            <div class="metric-card">
-                <div class="metric-value">${upDown(m.annual_return || 0)}</div>
-                <div class="metric-label">年化收益</div>
+
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-value">${upDown(m.total_return || 0)}</div>
+                    <div class="metric-label">总收益率</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${upDown(m.annual_return || 0)}</div>
+                    <div class="metric-label">年化收益</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value price-down">${(m.max_drawdown || 0).toFixed(2)}%</div>
+                    <div class="metric-label">最大回撤</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${(m.sharpe_ratio || 0).toFixed(2)}</div>
+                    <div class="metric-label">夏普比率</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${(m.win_rate || 0).toFixed(1)}%</div>
+                    <div class="metric-label">胜率</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${(m.profit_loss_ratio || 0).toFixed(2)}</div>
+                    <div class="metric-label">盈亏比</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${m.total_trades || 0}</div>
+                    <div class="metric-label">交易次数</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" style="font-size:16px;">${(m.final_equity || 0).toLocaleString()}</div>
+                    <div class="metric-label">最终权益</div>
+                </div>
             </div>
-            <div class="metric-card">
-                <div class="metric-value price-down">${(m.max_drawdown || 0).toFixed(2)}%</div>
-                <div class="metric-label">最大回撤</div>
+
+            <div class="card" style="margin-bottom:12px;">
+                <div class="card-title">收益曲线</div>
+                <div id="pEquityCurve" style="height:280px;"></div>
             </div>
-            <div class="metric-card">
-                <div class="metric-value">${(m.sharpe_ratio || 0).toFixed(2)}</div>
-                <div class="metric-label">夏普比率</div>
+
+            <div class="card" style="margin-bottom:12px;">
+                <div class="card-title">月度收益</div>
+                <div id="pMonthlyReturns"></div>
             </div>
-            <div class="metric-card">
-                <div class="metric-value">${(m.win_rate || 0).toFixed(1)}%</div>
-                <div class="metric-label">胜率</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value">${(m.profit_loss_ratio || 0).toFixed(2)}</div>
-                <div class="metric-label">盈亏比</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value">${m.total_trades || 0}</div>
-                <div class="metric-label">交易次数</div>
+
+            <div class="card">
+                <div class="card-title">交易记录 (${trades.length}笔)</div>
+                <div style="max-height:400px;overflow-y:auto;">
+                    <table>
+                        <thead><tr><th>日期</th><th>操作</th><th>代码</th><th>价格</th><th>数量</th><th>盈亏</th><th>原因</th></tr></thead>
+                        <tbody>
+                            ${trades.map(t => `
+                                <tr>
+                                    <td>${t.date}</td>
+                                    <td><span class="${t.action === 'buy' ? 'price-up' : 'price-down'}">${t.action === 'buy' ? '买入' : '卖出'}</span></td>
+                                    <td>${t.code}</td>
+                                    <td>${t.price?.toFixed(2)}</td>
+                                    <td>${t.amount}</td>
+                                    <td>${t.pnl != null ? upDown(t.pnl, '') : '--'}</td>
+                                    <td style="font-size:11px;color:var(--text-muted);">${t.reason || ''}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
-        <div class="card" style="margin-bottom: 16px;">
-            <div class="card-title">收益曲线</div>
-            <div id="equityCurveChart" style="height: 300px;"></div>
+
+        <div class="pipeline-section" id="sensitivitySection" style="display:none;"></div>
+        <div class="pipeline-section" id="walkForwardSection" style="display:none;"></div>
+        <div class="pipeline-section" id="summarySection" style="display:none;"></div>
+    `;
+
+    // Render equity curve
+    if (curve.length > 0) {
+        const { createChart } = await import('https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.mjs');
+        const chartContainer = document.getElementById('pEquityCurve');
+        const chart = createChart(chartContainer, {
+            layout: { background: { color: '#151d2b' }, textColor: '#94a3b8', fontSize: 11 },
+            grid: { vertLines: { color: '#1e2a3a' }, horzLines: { color: '#1e2a3a' } },
+            rightPriceScale: { borderColor: '#1e2a3a' },
+            timeScale: { borderColor: '#1e2a3a', timeVisible: false },
+            handleScroll: true, handleScale: true,
+        });
+        chart.addLineSeries({ color: '#3b82f6', lineWidth: 2, title: '策略', priceLineVisible: false })
+            .setData(curve.map(p => ({ time: p.date, value: p.equity })));
+        chart.addLineSeries({ color: '#64748b', lineWidth: 1, lineStyle: 2, title: '基准', priceLineVisible: false })
+            .setData(curve.map(p => ({ time: p.date, value: p.benchmark })));
+        chart.timeScale().fitContent();
+        new ResizeObserver(() => chart.applyOptions({ width: chartContainer.clientWidth, height: chartContainer.clientHeight })).observe(chartContainer);
+    }
+
+    // Monthly returns
+    renderMonthlyReturns(curve);
+}
+
+function renderMonthlyReturns(curve) {
+    const container = document.getElementById('pMonthlyReturns');
+    if (!curve || curve.length === 0) { container.innerHTML = '无数据'; return; }
+
+    const monthly = {};
+    let prevEquity = curve[0].equity;
+    for (const p of curve) {
+        const ym = p.date.substring(0, 7);
+        if (!monthly[ym]) monthly[ym] = { start: prevEquity, end: p.equity };
+        monthly[ym].end = p.equity;
+    }
+
+    const rows = Object.entries(monthly).map(([ym, v]) => {
+        const ret = ((v.end - v.start) / v.start * 100);
+        const cls = ret >= 0 ? 'price-up' : 'price-down';
+        const bg = ret >= 0 ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.12)';
+        return `<div style="display:inline-block;padding:4px 8px;margin:2px;border-radius:4px;background:${bg};font-size:11px;">
+            <span style="color:var(--text-muted)">${ym}</span>
+            <span class="${cls}" style="font-family:var(--font-mono);margin-left:4px;">${ret >= 0 ? '+' : ''}${ret.toFixed(1)}%</span>
+        </div>`;
+    });
+
+    container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:2px;">${rows.join('')}</div>`;
+}
+
+async function runSensitivityAnalysis() {
+    const status = document.getElementById('step2Status');
+    status.innerHTML = '<span class="badge badge-warning">运行中</span>';
+
+    const strategy = document.getElementById('pipelineStrategy').value;
+    const code = document.getElementById('pCode').value;
+    const start = document.getElementById('pStart').value;
+    const end = document.getElementById('pEnd').value;
+    const capital = parseFloat(document.getElementById('pCapital').value);
+    const range = document.querySelector('.scan-btn.active')?.dataset.range || 'narrow';
+
+    // Generate parameter variations
+    const paramRanges = {
+        ma_cross: {
+            narrow: [{ short: 3, long: 15 }, { short: 5, long: 20 }, { short: 5, long: 30 }, { short: 10, long: 20 }, { short: 10, long: 30 }],
+            medium: [{ short: 3, long: 10 }, { short: 3, long: 20 }, { short: 5, long: 15 }, { short: 5, long: 20 }, { short: 5, long: 30 }, { short: 10, long: 20 }, { short: 10, long: 30 }, { short: 10, long: 60 }],
+            wide: [{ short: 3, long: 10 }, { short: 3, long: 20 }, { short: 3, long: 30 }, { short: 5, long: 10 }, { short: 5, long: 15 }, { short: 5, long: 20 }, { short: 5, long: 30 }, { short: 5, long: 60 }, { short: 10, long: 20 }, { short: 10, long: 30 }, { short: 10, long: 60 }, { short: 20, long: 60 }],
+        },
+    };
+
+    const variations = paramRanges[strategy]?.[range] || [{}];
+    const results = [];
+
+    for (const params of variations) {
+        try {
+            const resp = await fetch('/api/backtest/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ strategy, code, start_date: start, end_date: end, capital, params }),
+            });
+            const data = await resp.json();
+            results.push({ params, metrics: data.data?.metrics || {} });
+        } catch { results.push({ params, metrics: {} }); }
+    }
+
+    status.innerHTML = '<span class="badge badge-success">完成</span>';
+
+    const section = document.getElementById('sensitivitySection');
+    section.style.display = 'block';
+    section.innerHTML = `
+        <div class="section-header">
+            <span class="step-num">2</span>
+            <span>参数敏感性分析</span>
+            <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">${results.length} 组参数</span>
         </div>
         <div class="card">
-            <div class="card-title">交易记录</div>
             <table>
-                <thead>
-                    <tr><th>日期</th><th>操作</th><th>代码</th><th>价格</th><th>数量</th><th>盈亏</th></tr>
-                </thead>
+                <thead><tr><th>参数</th><th>收益率</th><th>年化</th><th>最大回撤</th><th>夏普</th><th>胜率</th><th>交易数</th></tr></thead>
                 <tbody>
-                    ${trades.slice(0, 50).map(t => `
-                        <tr>
-                            <td>${t.date}</td>
-                            <td><span class="${t.action === 'buy' ? 'price-up' : 'price-down'}">${t.action === 'buy' ? '买入' : '卖出'}</span></td>
-                            <td>${t.code}</td>
-                            <td>${t.price?.toFixed(2)}</td>
-                            <td>${t.amount}</td>
-                            <td>${t.pnl != null ? upDown(t.pnl, '') : '--'}</td>
-                        </tr>
-                    `).join('')}
+                    ${results.map(r => {
+                        const m = r.metrics;
+                        const cls = (m.total_return || 0) >= 0 ? 'price-up' : 'price-down';
+                        return `<tr>
+                            <td style="font-size:11px;">${JSON.stringify(r.params)}</td>
+                            <td class="${cls}">${(m.total_return || 0).toFixed(2)}%</td>
+                            <td>${(m.annual_return || 0).toFixed(2)}%</td>
+                            <td class="price-down">${(m.max_drawdown || 0).toFixed(2)}%</td>
+                            <td>${(m.sharpe_ratio || 0).toFixed(2)}</td>
+                            <td>${(m.win_rate || 0).toFixed(1)}%</td>
+                            <td>${m.total_trades || 0}</td>
+                        </tr>`;
+                    }).join('')}
                 </tbody>
             </table>
         </div>
     `;
 
-    // Render equity curve chart
-    const equityCurve = data.equity_curve || [];
-    if (equityCurve.length > 0) {
-        renderEquityCurve(equityCurve);
-    }
+    section.scrollIntoView({ behavior: 'smooth' });
 }
 
-async function renderEquityCurve(equityCurve) {
-    const { createChart } = await import('https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.mjs');
-    const container = document.getElementById('equityCurveChart');
-    if (!container) return;
+async function runWalkForward() {
+    const status = document.getElementById('step3Status');
+    status.innerHTML = '<span class="badge badge-warning">运行中</span>';
 
-    const chart = createChart(container, {
-        layout: { background: { color: '#151d2b' }, textColor: '#94a3b8', fontSize: 11 },
-        grid: { vertLines: { color: '#1e2a3a' }, horzLines: { color: '#1e2a3a' } },
-        rightPriceScale: { borderColor: '#1e2a3a' },
-        timeScale: { borderColor: '#1e2a3a', timeVisible: false },
-        handleScroll: true,
-        handleScale: true,
-    });
+    const strategy = document.getElementById('pipelineStrategy').value;
+    const code = document.getElementById('pCode').value;
+    const start = document.getElementById('pStart').value;
+    const end = document.getElementById('pEnd').value;
+    const capital = parseFloat(document.getElementById('pCapital').value);
+    const folds = parseInt(document.getElementById('pFolds').value) || 5;
 
-    const equitySeries = chart.addLineSeries({
-        color: '#3b82f6',
-        lineWidth: 2,
-        priceLineVisible: false,
-        lastValueVisible: true,
-        title: '策略收益',
-    });
+    // Split date range into folds
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const totalDays = (endDate - startDate) / (1000 * 60 * 60 * 24);
+    const foldDays = Math.floor(totalDays / folds);
 
-    const benchmarkSeries = chart.addLineSeries({
-        color: '#64748b',
-        lineWidth: 1,
-        lineStyle: 2,
-        priceLineVisible: false,
-        lastValueVisible: true,
-        title: '基准',
-    });
+    const results = [];
+    for (let i = 0; i < folds; i++) {
+        const foldStart = new Date(startDate.getTime() + i * foldDays * 86400000);
+        const foldEnd = new Date(foldStart.getTime() + foldDays * 86400000);
+        const fs = foldStart.toISOString().split('T')[0];
+        const fe = foldEnd.toISOString().split('T')[0];
 
-    equitySeries.setData(equityCurve.map(p => ({ time: p.date, value: p.equity })));
-    benchmarkSeries.setData(equityCurve.map(p => ({ time: p.date, value: p.benchmark })));
-    chart.timeScale().fitContent();
+        try {
+            const resp = await fetch('/api/backtest/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ strategy, code, start_date: fs, end_date: fe, capital }),
+            });
+            const data = await resp.json();
+            results.push({ fold: i + 1, start: fs, end: fe, metrics: data.data?.metrics || {} });
+        } catch { results.push({ fold: i + 1, start: fs, end: fe, metrics: {} }); }
+    }
 
-    const observer = new ResizeObserver(() => {
-        chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
-    });
-    observer.observe(container);
+    status.innerHTML = '<span class="badge badge-success">完成</span>';
+    document.getElementById('step4Status').innerHTML = '<span class="badge badge-success">完成</span>';
+
+    const section = document.getElementById('walkForwardSection');
+    section.style.display = 'block';
+
+    const avgReturn = results.reduce((s, r) => s + (r.metrics.total_return || 0), 0) / results.length;
+    const avgSharpe = results.reduce((s, r) => s + (r.metrics.sharpe_ratio || 0), 0) / results.length;
+    const positiveFolds = results.filter(r => (r.metrics.total_return || 0) > 0).length;
+
+    section.innerHTML = `
+        <div class="section-header">
+            <span class="step-num">3</span>
+            <span>Walk-Forward 分析</span>
+        </div>
+        <div class="card" style="margin-bottom:12px;">
+            <table>
+                <thead><tr><th>折</th><th>区间</th><th>收益率</th><th>最大回撤</th><th>夏普</th><th>交易数</th></tr></thead>
+                <tbody>
+                    ${results.map(r => {
+                        const m = r.metrics;
+                        const cls = (m.total_return || 0) >= 0 ? 'price-up' : 'price-down';
+                        return `<tr>
+                            <td>${r.fold}</td>
+                            <td style="font-size:11px;">${r.start} ~ ${r.end}</td>
+                            <td class="${cls}">${(m.total_return || 0).toFixed(2)}%</td>
+                            <td class="price-down">${(m.max_drawdown || 0).toFixed(2)}%</td>
+                            <td>${(m.sharpe_ratio || 0).toFixed(2)}</td>
+                            <td>${m.total_trades || 0}</td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    // Summary section
+    const summary = document.getElementById('summarySection');
+    summary.style.display = 'block';
+    const score = (avgReturn > 0 ? 40 : 0) + (avgSharpe > 0.5 ? 30 : avgSharpe > 0 ? 15 : 0) + (positiveFolds / folds > 0.6 ? 30 : positiveFolds / folds > 0.4 ? 15 : 0);
+    const grade = score >= 70 ? 'A' : score >= 50 ? 'B' : score >= 30 ? 'C' : 'D';
+    const gradeColor = { A: 'var(--green)', B: '#3b82f6', C: 'var(--yellow)', D: 'var(--red)' }[grade];
+
+    summary.innerHTML = `
+        <div class="section-header">
+            <span class="step-num">4</span>
+            <span>总结</span>
+        </div>
+        <div class="card">
+            <div style="display:flex;align-items:center;gap:24px;">
+                <div style="text-align:center;">
+                    <div style="font-size:48px;font-weight:800;color:${gradeColor};font-family:var(--font-mono);">${grade}</div>
+                    <div style="font-size:12px;color:var(--text-muted);">综合评分 ${score}/100</div>
+                </div>
+                <div style="flex:1;">
+                    <div style="margin-bottom:8px;">
+                        <span class="info-item">平均收益: <span class="${avgReturn >= 0 ? 'price-up' : 'price-down'}">${avgReturn.toFixed(2)}%</span></span>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <span class="info-item">平均夏普: <span>${avgSharpe.toFixed(2)}</span></span>
+                    </div>
+                    <div>
+                        <span class="info-item">盈利折数: <span>${positiveFolds}/${folds}</span></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    summary.scrollIntoView({ behavior: 'smooth' });
 }
 
 export function destroy() {}

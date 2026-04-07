@@ -422,3 +422,133 @@ td {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
+
+/* Backtest Tabs */
+.backtest-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+}
+
+.backtest-tabs .tab {
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+}
+
+.backtest-tabs .tab:hover {
+    color: var(--text-secondary);
+}
+
+.backtest-tabs .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.backtest-tabs .tab .tab-sub {
+    display: block;
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+/* Strategy Grid */
+.strategy-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.strategy-card {
+    transition: border-color 0.15s;
+}
+
+.strategy-card:hover {
+    border-color: var(--accent);
+}
+
+/* Pipeline Layout */
+.pipeline-layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 16px;
+    height: 100%;
+}
+
+.pipeline-sidebar {
+    overflow-y: auto;
+}
+
+.pipeline-results {
+    overflow-y: auto;
+}
+
+/* Pipeline Steps */
+.pipeline-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.pipeline-step {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.step-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.step-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.step-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.step-status {
+    margin-left: auto;
+}
+
+/* Pipeline Section */
+.pipeline-section {
+    margin-bottom: 24px;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Small buttons */
+.btn-sm {
+    padding: 3px 10px;
+    font-size: 12px;
+}
