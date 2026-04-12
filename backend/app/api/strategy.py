@@ -23,6 +23,16 @@ BUILTIN_STRATEGIES = [
     {"id": "platform_breakout", "name": "强势平台启动", "type": "pattern", "builtin": True,
      "params": {"days": 20, "amplitude": 10},
      "description": "识别横盘整理区间，突破上沿买入"},
+    {"id": "factor_low_pb_momentum", "name": "低PB + 动量", "type": "factor", "builtin": True,
+     "params": {
+         "factor_configs": [
+             {"key": "pb", "weight": 0.5},
+             {"key": "momentum_20", "weight": 0.5}
+         ],
+         "top_n": 10,
+         "rebalance": "monthly"
+     },
+     "description": "低估值与短期动量混合打分，做月度调仓"},
 ]
 
 
@@ -74,6 +84,7 @@ def list_strategies():
             "id": r["id"], "name": r["name"], "type": r["type"],
             "description": r["description"], "builtin": False,
             "params": json.loads(r["params"]) if r["params"] else {},
+            "code": r["code"] or "",
             "enabled": bool(r["enabled"]),
         }
         for r in rows

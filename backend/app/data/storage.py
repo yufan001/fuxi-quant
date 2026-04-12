@@ -103,6 +103,58 @@ class MarketStorage:
         conn.close()
         return [r["code"] for r in rows]
 
+    def get_histories(self, codes: list[str], start_date: Optional[str] = None, end_date: Optional[str] = None) -> dict[str, list[dict]]:
+        if not codes:
+            return {}
+
+        conn = get_market_db()
+        placeholders = ",".join("?" for _ in codes)
+        sql = f"SELECT * FROM stock_daily WHERE code IN ({placeholders})"
+        params: list = list(codes)
+        if start_date:
+            sql += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            sql += " AND date <= ?"
+            params.append(end_date)
+        sql += " ORDER BY code ASC, date ASC"
+
+        rows = conn.execute(sql, params).fetchall()
+        conn.close()
+
+        grouped = {code: [] for code in codes}
+        for row in rows:
+            grouped[row["code"]].append(dict(row))
+        return grouped
+
+    def get_trade_dates(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> list[str]:
+        conn = get_market_db()
+        sql = "SELECT date FROM trade_calendar WHERE is_trading_day = 1"
+        params: list = []
+        if start_date:
+            sql += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            sql += " AND date <= ?"
+            params.append(end_date)
+        sql += " ORDER BY date ASC"
+
+        rows = conn.execute(sql, params).fetchall()
+        if not rows:
+            sql = "SELECT DISTINCT date FROM stock_daily WHERE 1 = 1"
+            params = []
+            if start_date:
+                sql += " AND date >= ?"
+                params.append(start_date)
+            if end_date:
+                sql += " AND date <= ?"
+                params.append(end_date)
+            sql += " ORDER BY date ASC"
+            rows = conn.execute(sql, params).fetchall()
+
+        conn.close()
+        return [row["date"] for row in rows]
+
     def get_downloaded_codes(self) -> set[str]:
         conn = get_market_db()
         rows = conn.execute("SELECT DISTINCT code FROM stock_daily").fetchall()

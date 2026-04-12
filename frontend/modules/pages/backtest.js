@@ -1,4 +1,8 @@
+import { buildFactorRunPayload, isFactorStrategy } from './backtest/factor-utils.js?v=3';
+import { createStrategy, deleteStrategy, getStrategies, startBacktest, startFactorBacktest, updateStrategy } from '../api/client.js?v=3';
+
 let currentTab = 'strategy-lib';
+let verifyStrategies = [];
 
 export async function render(container) {
     container.innerHTML = `
@@ -35,8 +39,7 @@ async function renderTab(container) {
 async function renderStrategyLib(container) {
     container.innerHTML = '<div style="padding:20px;color:var(--text-muted)">加载中...</div>';
     try {
-        const resp = await fetch('/api/strategy/list');
-        const data = await resp.json();
+        const data = await getStrategies();
         const strategies = data.data || [];
 
         container.innerHTML = `
@@ -65,7 +68,7 @@ async function renderStrategyLib(container) {
                 e.stopPropagation();
                 const sid = card.dataset.id;
                 if (confirm('确定删除此策略？')) {
-                    await fetch(`/api/strategy/${sid}`, { method: 'DELETE' });
+                    await deleteStrategy(sid);
                     await renderStrategyLib(container);
                 }
             });
@@ -76,7 +79,10 @@ async function renderStrategyLib(container) {
                 document.querySelector('.tab[data-tab="strategy-verify"]').click();
                 setTimeout(() => {
                     const sel = document.getElementById('pipelineStrategy');
-                    if (sel) sel.value = sid;
+                    if (sel) {
+                        sel.value = sid;
+                        sel.dispatchEvent(new Event('change'));
+                    }
                 }, 100);
             });
         });
@@ -86,8 +92,8 @@ async function renderStrategyLib(container) {
 }
 
 function renderStrategyCard(s) {
-    const typeLabels = { tech: '技术指标', pattern: '形态识别', ml: 'AI/ML', custom: '自定义' };
-    const typeColors = { tech: '#3b82f6', pattern: '#a855f7', ml: '#f59e0b', custom: '#22c55e' };
+    const typeLabels = { tech: '技术指标', pattern: '形态识别', ml: 'AI/ML', factor: '因子选股', custom: '自定义' };
+    const typeColors = { tech: '#3b82f6', pattern: '#a855f7', ml: '#f59e0b', factor: '#06b6d4', custom: '#22c55e' };
     const color = typeColors[s.type] || '#64748b';
     const label = typeLabels[s.type] || s.type;
 
@@ -112,6 +118,24 @@ function renderStrategyCard(s) {
     `;
 }
 
+function bindScriptUpload(inputId, textareaId) {
+    const fileInput = document.getElementById(inputId);
+    const textarea = document.getElementById(textareaId);
+    if (!fileInput || !textarea) return;
+    fileInput.onchange = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        textarea.value = await file.text();
+    };
+}
+
+function toggleStrategyCodeEditor() {
+    const type = document.getElementById('modalType')?.value;
+    const codeGroup = document.getElementById('modalCodeGroup');
+    if (!codeGroup) return;
+    codeGroup.style.display = (type === 'factor' || type === 'custom') ? 'block' : 'none';
+}
+
 function showStrategyModal(existing = null) {
     const modal = document.getElementById('strategyModal');
     const isEdit = !!existing;
@@ -133,6 +157,7 @@ function showStrategyModal(existing = null) {
                         <option value="tech" ${existing?.type === 'tech' ? 'selected' : ''}>技术指标</option>
                         <option value="pattern" ${existing?.type === 'pattern' ? 'selected' : ''}>形态识别</option>
                         <option value="ml" ${existing?.type === 'ml' ? 'selected' : ''}>AI/ML</option>
+                        <option value="factor" ${existing?.type === 'factor' ? 'selected' : ''}>因子选股</option>
                         <option value="custom" ${!existing || existing?.type === 'custom' ? 'selected' : ''}>自定义</option>
                     </select>
                 </div>
@@ -144,6 +169,14 @@ function showStrategyModal(existing = null) {
                     <label class="form-label">参数 (JSON)</label>
                     <textarea class="form-input" id="modalParams" rows="3" style="font-family:var(--font-mono);font-size:12px;">${JSON.stringify(existing?.params || {}, null, 2)}</textarea>
                 </div>
+                <div class="form-group" id="modalCodeGroup" style="display:none;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                        <label class="form-label" style="margin:0;">Python 脚本</label>
+                        <input type="file" id="modalScriptFile" accept=".py" style="font-size:11px;color:var(--text-muted);max-width:190px;">
+                    </div>
+                    <div style="font-size:11px;color:var(--text-muted);margin:6px 0 8px;">支持 score_stocks(histories, context) 或 select_portfolio(histories, context)</div>
+                    <textarea class="form-input" id="modalCode" rows="10" style="font-family:var(--font-mono);font-size:12px;white-space:pre;">${existing?.code || ''}</textarea>
+                </div>
                 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
                     <button class="btn" id="btnCancelModal">取消</button>
                     <button class="btn btn-primary" id="btnSaveModal">${isEdit ? '保存' : '创建'}</button>
@@ -154,23 +187,21 @@ function showStrategyModal(existing = null) {
 
     document.getElementById('btnCloseModal').addEventListener('click', () => modal.style.display = 'none');
     document.getElementById('btnCancelModal').addEventListener('click', () => modal.style.display = 'none');
+    document.getElementById('modalType').addEventListener('change', toggleStrategyCodeEditor);
+    toggleStrategyCodeEditor();
+    bindScriptUpload('modalScriptFile', 'modalCode');
     document.getElementById('btnSaveModal').addEventListener('click', async () => {
         const body = {
             name: document.getElementById('modalName').value,
             type: document.getElementById('modalType').value,
             description: document.getElementById('modalDesc').value,
             params: JSON.parse(document.getElementById('modalParams').value || '{}'),
+            code: document.getElementById('modalCode')?.value || '',
         };
         if (isEdit) {
-            await fetch(`/api/strategy/${existing.id}`, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
+            await updateStrategy(existing.id, body);
         } else {
-            await fetch('/api/strategy/create', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
+            await createStrategy(body);
         }
         modal.style.display = 'none';
         await renderStrategyLib(document.getElementById('tabContent'));
@@ -179,8 +210,8 @@ function showStrategyModal(existing = null) {
 
 // ===== Strategy Verification Pipeline =====
 async function renderStrategyVerify(container) {
-    const resp = await fetch('/api/strategy/list');
-    const strategies = (await resp.json()).data || [];
+    const strategies = (await getStrategies()).data || [];
+    verifyStrategies = strategies;
 
     container.innerHTML = `
         <div class="pipeline-layout">
@@ -200,7 +231,7 @@ async function renderStrategyVerify(container) {
                             ${strategies.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
                         </select>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" id="singleCodeGroup">
                         <label class="form-label">股票代码</label>
                         <input class="form-input" id="pCode" value="sh.600000">
                     </div>
@@ -214,6 +245,41 @@ async function renderStrategyVerify(container) {
                     <div class="form-group">
                         <label class="form-label">初始资金</label>
                         <input class="form-input" id="pCapital" value="100000">
+                    </div>
+                    <div class="card" id="factorConfigGroup" style="display:none;background:linear-gradient(180deg, rgba(6,182,212,0.10), rgba(15,23,42,0.65));border:1px solid rgba(6,182,212,0.25);margin-top:12px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;">
+                            <div>
+                                <div style="font-size:12px;color:#67e8f9;letter-spacing:0.08em;text-transform:uppercase;">Factor Lab</div>
+                                <div style="font-size:16px;font-weight:700;">截面选股配置</div>
+                            </div>
+                            <div id="factorPresetChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">TopN</label>
+                            <input class="form-input" id="factorTopN" value="10">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">调仓频率</label>
+                            <select class="form-select" id="factorRebalance">
+                                <option value="monthly">月度</option>
+                                <option value="weekly">每周</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label class="form-label">股票池代码（可选）</label>
+                            <textarea class="form-input" id="factorPoolCodes" rows="4" placeholder="留空默认使用全部已下载股票；也可输入 sh.600000, sz.000001"></textarea>
+                        </div>
+                    </div>
+                    <div class="card" id="factorScriptGroup" style="display:none;background:linear-gradient(180deg, rgba(59,130,246,0.10), rgba(15,23,42,0.65));border:1px solid rgba(59,130,246,0.25);margin-top:12px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
+                            <div>
+                                <div style="font-size:12px;color:#93c5fd;letter-spacing:0.08em;text-transform:uppercase;">Python Strategy</div>
+                                <div style="font-size:16px;font-weight:700;">脚本编辑器</div>
+                            </div>
+                            <input type="file" id="factorScriptFile" accept=".py" style="font-size:11px;color:var(--text-muted);max-width:190px;">
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">支持 score_stocks(histories, context) 或 select_portfolio(histories, context)</div>
+                        <textarea class="form-input" id="factorScriptEditor" rows="12" style="font-family:var(--font-mono);font-size:12px;white-space:pre;"></textarea>
                     </div>
                 </div>
 
@@ -297,33 +363,188 @@ async function renderStrategyVerify(container) {
     document.getElementById('btnRunSensitivity').addEventListener('click', () => runSensitivityAnalysis());
     // Step 3: Walk-Forward
     document.getElementById('btnRunWalkForward').addEventListener('click', () => runWalkForward());
+
+    document.getElementById('pipelineStrategy').addEventListener('change', updatePipelineMode);
+    updatePipelineMode();
+}
+
+function getSelectedStrategy() {
+    const selectedId = document.getElementById('pipelineStrategy')?.value;
+    return verifyStrategies.find(s => s.id === selectedId) || null;
+}
+
+function renderFactorChips(strategy) {
+    const container = document.getElementById('factorPresetChips');
+    if (!container) return;
+    const factors = strategy?.params?.factor_configs || [];
+    container.innerHTML = factors.map(item => `
+        <span style="padding:4px 8px;border-radius:999px;background:rgba(6,182,212,0.16);color:#67e8f9;font-size:11px;font-family:var(--font-mono);">
+            ${item.key} × ${item.weight}
+        </span>
+    `).join('');
+}
+
+function updatePipelineMode() {
+    const strategy = getSelectedStrategy();
+    const factorMode = isFactorStrategy(strategy);
+    const singleCodeGroup = document.getElementById('singleCodeGroup');
+    const factorConfigGroup = document.getElementById('factorConfigGroup');
+    const factorScriptGroup = document.getElementById('factorScriptGroup');
+    const factorScriptEditor = document.getElementById('factorScriptEditor');
+    const sensitivityBtn = document.getElementById('btnRunSensitivity');
+    const walkForwardBtn = document.getElementById('btnRunWalkForward');
+    const step2Status = document.getElementById('step2Status');
+    const step3Status = document.getElementById('step3Status');
+
+    if (singleCodeGroup) singleCodeGroup.style.display = factorMode ? 'none' : 'block';
+    if (factorConfigGroup) factorConfigGroup.style.display = factorMode ? 'block' : 'none';
+    if (factorScriptGroup) factorScriptGroup.style.display = factorMode && strategy?.code ? 'block' : 'none';
+    if (factorMode) {
+        renderFactorChips(strategy);
+        document.getElementById('factorTopN').value = strategy?.params?.top_n || 10;
+        document.getElementById('factorRebalance').value = strategy?.params?.rebalance || 'monthly';
+        if (factorScriptEditor) factorScriptEditor.value = strategy?.code || '';
+        bindScriptUpload('factorScriptFile', 'factorScriptEditor');
+        sensitivityBtn.disabled = true;
+        walkForwardBtn.disabled = true;
+        sensitivityBtn.style.opacity = '0.5';
+        walkForwardBtn.style.opacity = '0.5';
+        step2Status.innerHTML = '<span class="badge badge-warning">后续</span>';
+        step3Status.innerHTML = '<span class="badge badge-warning">后续</span>';
+    } else {
+        sensitivityBtn.disabled = false;
+        walkForwardBtn.disabled = false;
+        sensitivityBtn.style.opacity = '1';
+        walkForwardBtn.style.opacity = '1';
+        step2Status.innerHTML = '';
+        step3Status.innerHTML = '';
+    }
 }
 
 async function runPipelineBacktest() {
     const status = document.getElementById('step1Status');
     status.innerHTML = '<span class="badge badge-warning">运行中</span>';
 
-    const config = {
-        strategy: document.getElementById('pipelineStrategy').value,
-        code: document.getElementById('pCode').value,
-        start_date: document.getElementById('pStart').value,
-        end_date: document.getElementById('pEnd').value,
-        capital: parseFloat(document.getElementById('pCapital').value),
-    };
+    const strategy = getSelectedStrategy();
+    const factorMode = isFactorStrategy(strategy);
 
     try {
-        const resp = await fetch('/api/backtest/run', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config),
-        });
-        const data = await resp.json();
+        const data = factorMode
+            ? await startFactorBacktest(buildFactorRunPayload(strategy, {
+                start_date: document.getElementById('pStart').value,
+                end_date: document.getElementById('pEnd').value,
+                capital: document.getElementById('pCapital').value,
+                top_n: document.getElementById('factorTopN').value,
+                rebalance: document.getElementById('factorRebalance').value,
+                pool_codes: document.getElementById('factorPoolCodes').value,
+                script: document.getElementById('factorScriptEditor')?.value || '',
+            }))
+            : await startBacktest({
+                strategy: document.getElementById('pipelineStrategy').value,
+                code: document.getElementById('pCode').value,
+                start_date: document.getElementById('pStart').value,
+                end_date: document.getElementById('pEnd').value,
+                capital: parseFloat(document.getElementById('pCapital').value),
+            });
         if (data.error) throw new Error(data.error);
 
         status.innerHTML = '<span class="badge badge-success">完成</span>';
-        displayPipelineResults(data.data);
+        factorMode ? displayFactorResults(data.data) : displayPipelineResults(data.data);
     } catch (e) {
         status.innerHTML = `<span class="badge badge-error">失败</span>`;
+    }
+}
+
+async function displayFactorResults(data) {
+    const container = document.getElementById('pipelineResults');
+    const m = data.metrics || {};
+    const curve = data.equity_curve || [];
+    const rebalances = data.rebalances || [];
+    const upDown = (v, suffix = '%') => {
+        const cls = v >= 0 ? 'price-up' : 'price-down';
+        const sign = v >= 0 ? '+' : '';
+        return `<span class="${cls}">${sign}${Number(v || 0).toFixed(2)}${suffix}</span>`;
+    };
+
+    container.innerHTML = `
+        <div class="pipeline-section">
+            <div class="section-header">
+                <span class="step-num">1</span>
+                <span>因子组合回测</span>
+                <span style="margin-left:auto;font-size:11px;color:#67e8f9;letter-spacing:0.08em;text-transform:uppercase;">Factor Lab</span>
+            </div>
+
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-value">${upDown(m.total_return || 0)}</div>
+                    <div class="metric-label">总收益率</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" style="font-size:16px;">${(m.final_equity || 0).toLocaleString()}</div>
+                    <div class="metric-label">最终权益</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${m.rebalance_count || 0}</div>
+                    <div class="metric-label">调仓次数</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${data.pool_size || 0}</div>
+                    <div class="metric-label">股票池数量</div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-bottom:12px;background:linear-gradient(180deg, rgba(6,182,212,0.10), rgba(15,23,42,0.65));border:1px solid rgba(6,182,212,0.18);">
+                <div class="card-title">权益曲线</div>
+                <div id="factorEquityCurve" style="height:280px;"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">调仓快照 (${rebalances.length} 次)</div>
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    ${rebalances.map(item => `
+                        <div style="border:1px solid rgba(6,182,212,0.18);border-radius:10px;padding:14px;background:rgba(15,23,42,0.65);">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;">
+                                <div style="font-weight:700;">${item.date}</div>
+                                <div style="font-size:11px;color:var(--text-muted);">现金 ${Number(item.cash || 0).toLocaleString()}</div>
+                            </div>
+                            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                ${(item.selected || []).map(stock => `
+                                    <div style="min-width:200px;flex:1;background:rgba(6,182,212,0.08);border:1px solid rgba(6,182,212,0.16);border-radius:8px;padding:10px;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                                            <strong>${stock.code}</strong>
+                                            <span class="price-up" style="font-family:var(--font-mono);">${Number(stock.score || 0).toFixed(2)}</span>
+                                        </div>
+                                        <div style="font-size:11px;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:6px;">
+                                            ${Object.entries(stock.factor_values || {}).map(([key, value]) => `<span>${key}: ${Number(value).toFixed(3)}</span>`).join('') || '<span>无因子明细</span>'}
+                                        </div>
+                                    </div>
+                                `).join('') || '<div style="color:var(--text-muted);font-size:12px;">无有效入选股票</div>'}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+
+        <div class="pipeline-section" id="sensitivitySection" style="display:none;"></div>
+        <div class="pipeline-section" id="walkForwardSection" style="display:none;"></div>
+        <div class="pipeline-section" id="summarySection" style="display:none;"></div>
+    `;
+
+    if (curve.length > 0) {
+        const { createChart } = await import('https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.mjs');
+        const chartContainer = document.getElementById('factorEquityCurve');
+        const chart = createChart(chartContainer, {
+            layout: { background: { color: '#151d2b' }, textColor: '#94a3b8', fontSize: 11 },
+            grid: { vertLines: { color: '#1e2a3a' }, horzLines: { color: '#1e2a3a' } },
+            rightPriceScale: { borderColor: '#1e2a3a' },
+            timeScale: { borderColor: '#1e2a3a', timeVisible: false },
+            handleScroll: true, handleScale: true,
+        });
+        chart.addLineSeries({ color: '#06b6d4', lineWidth: 2, title: '因子组合', priceLineVisible: false })
+            .setData(curve.map(p => ({ time: p.date, value: p.equity })));
+        chart.timeScale().fitContent();
+        new ResizeObserver(() => chart.applyOptions({ width: chartContainer.clientWidth, height: chartContainer.clientHeight })).observe(chartContainer);
     }
 }
 
@@ -468,6 +689,7 @@ function renderMonthlyReturns(curve) {
 }
 
 async function runSensitivityAnalysis() {
+    if (isFactorStrategy(getSelectedStrategy())) return;
     const status = document.getElementById('step2Status');
     status.innerHTML = '<span class="badge badge-warning">运行中</span>';
 
@@ -492,12 +714,7 @@ async function runSensitivityAnalysis() {
 
     for (const params of variations) {
         try {
-            const resp = await fetch('/api/backtest/run', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ strategy, code, start_date: start, end_date: end, capital, params }),
-            });
-            const data = await resp.json();
+            const data = await startBacktest({ strategy, code, start_date: start, end_date: end, capital, params });
             results.push({ params, metrics: data.data?.metrics || {} });
         } catch { results.push({ params, metrics: {} }); }
     }
@@ -538,6 +755,7 @@ async function runSensitivityAnalysis() {
 }
 
 async function runWalkForward() {
+    if (isFactorStrategy(getSelectedStrategy())) return;
     const status = document.getElementById('step3Status');
     status.innerHTML = '<span class="badge badge-warning">运行中</span>';
 
@@ -562,12 +780,7 @@ async function runWalkForward() {
         const fe = foldEnd.toISOString().split('T')[0];
 
         try {
-            const resp = await fetch('/api/backtest/run', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ strategy, code, start_date: fs, end_date: fe, capital }),
-            });
-            const data = await resp.json();
+            const data = await startBacktest({ strategy, code, start_date: fs, end_date: fe, capital });
             results.push({ fold: i + 1, start: fs, end: fe, metrics: data.data?.metrics || {} });
         } catch { results.push({ fold: i + 1, start: fs, end: fe, metrics: {} }); }
     }

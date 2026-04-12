@@ -24,8 +24,7 @@ async function fetchJSON(url, options = {}) {
     const resp = await fetch(`${BASE_URL}${url}`, { headers, ...options });
     if (resp.status === 401) {
         clearToken();
-        window.location.hash = '#/login';
-        throw new Error('未授权，请先登录');
+        throw new Error('请求未授权');
     }
     if (!resp.ok) throw new Error(`API error: ${resp.status}`);
     return resp.json();
@@ -68,8 +67,37 @@ export async function getBacktestResult(taskId) {
     return fetchJSON(`/api/backtest/result/${taskId}`);
 }
 
+export async function startFactorBacktest(config) {
+    return fetchJSON('/api/backtest/factor/run', {
+        method: 'POST',
+        body: JSON.stringify(config),
+    });
+}
+
+export async function getFactorBacktestResult(runId) {
+    return fetchJSON(`/api/backtest/factor/${runId}`);
+}
+
 export async function getStrategies() {
     return fetchJSON('/api/strategy/list');
+}
+
+export async function createStrategy(config) {
+    return fetchJSON('/api/strategy/create', {
+        method: 'POST',
+        body: JSON.stringify(config),
+    });
+}
+
+export async function updateStrategy(id, config) {
+    return fetchJSON(`/api/strategy/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(config),
+    });
+}
+
+export async function deleteStrategy(id) {
+    return fetchJSON(`/api/strategy/${id}`, { method: 'DELETE' });
 }
 
 export async function getSystemStatus() {
