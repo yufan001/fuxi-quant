@@ -17,37 +17,17 @@
      - `score_stocks(histories, context)`：脚本返回每只股票分数，平台负责选股/调仓
      - `select_portfolio(histories, context)`：脚本直接返回目标组合，平台负责执行回测
 
-## 认证
+## 认证 / 调用方式
 
-除登录接口外，所有 `/api/*` 路由都需要 Bearer Token。
+当前版本已经切换为**本地无登录模式**，主要用于在 Windows 本机直接运行量化系统，并让后续 Nova 通过 HTTP 直接调用本机 API。
 
-### 登录
-
-`POST /api/auth/login`
-
-```json
-{
-  "username": "admin",
-  "password": "lianghua2026"
-}
-```
-
-返回：
-
-```json
-{
-  "data": {
-    "token": "<bearer-token>"
-  }
-}
-```
-
-后续请求头：
+因此当前 `/api/*` 接口默认**不再要求登录 token**，请求时只需要：
 
 ```http
-Authorization: Bearer <bearer-token>
 Content-Type: application/json
 ```
+
+如果后续重新启用鉴权，需要再补一层网关或 token 方案；本文档以下示例全部按当前的无鉴权本地模式给出。
 
 ## 策略管理 API
 
@@ -298,16 +278,19 @@ def select_portfolio(histories, context):
 
 ## Nova 调用建议
 
-Nova 后续建议优先走 `POST /api/backtest/factor/run`：
+Nova 后续建议直接调用运行在 **Windows 本机** 的量化服务，而不是走当前性能较弱的服务器部署。
 
-1. 登录拿 token
-2. 选择三种模式之一：
+推荐流程：
+
+1. 让本地服务启动在可访问地址（例如 `http://<windows-host>:8000`）
+2. Nova 直接调用 `POST /api/backtest/factor/run`
+3. 在三种模式里选一种：
    - 直接传 `factor_configs`
    - 直接传 `script`
    - 传 `strategy_id` 调用已保存脚本
-3. 拿到 `run_id`
-4. 轮询 `GET /api/backtest/factor/{run_id}`
-5. 读取 `metrics` / `equity_curve` / `rebalances`
+4. 拿到 `run_id`
+5. 轮询 `GET /api/backtest/factor/{run_id}`
+6. 读取 `metrics` / `equity_curve` / `rebalances`
 
 推荐 Nova 优先用 **方式 B / C**，因为脚本能力更灵活，适合自动生成和反复试验。
 
