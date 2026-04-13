@@ -19,12 +19,22 @@
 - Job 取消 / artifact 落盘 / 日志查询
 - Fuxi MCP 包装层（基于本地 API）
 
+## 界面截图
+
+### 主平台
+
+![主平台](docs/images/platform-page.png)
+
+### 策略验证
+
+![策略验证](docs/images/backtest-page.png)
+
 ## 技术栈
 
 ### 后端
 
 - **FastAPI**：API 服务与静态资源托管
-- **SQLite**：行情与业务数据存储
+- **SQLite + Parquet + DuckDB**：业务数据继续使用 SQLite；行情元数据保留在 SQLite，重型历史查询逐步切到 DuckDB + Parquet
 - **APScheduler**：定时任务（当前项目里已有调度基础）
 - **统一异步 Job System**：长任务走 submit/status/result/logs 流程，支持 webhook + 轮询双保险
 - **Job artifacts**：大结果按 job 落盘到 artifact 目录，避免把完整曲线/明细全塞进状态接口
@@ -47,6 +57,18 @@
 
 - `backend/app/data/baostock_provider.py`
 - `backend/app/data/downloader.py`
+
+### 市场存储布局（Phase 1）
+
+当前已开始做“业务数据 / 行情数据”解耦：
+
+- `data/db/business.db`：业务数据（策略配置、任务状态、回测记录等）
+- `data/market/market.db`：行情元数据与 SQLite 基础表
+- `data/market/parquet/stock_daily/`
+- `data/market/parquet/stock_weekly/`
+- `data/market/parquet/stock_monthly/`
+
+约定上，`backend/app/data/storage.py` 仍然是唯一支持的数据访问入口；DuckDB + Parquet 只是其内部实现细节，API / Job / MCP / 因子模块都不应该绕过它直接读取行情文件。
 
 当前可直接用于因子逻辑的字段主要来自 `stock_daily`：
 
@@ -102,7 +124,13 @@ lianghua/
 │       ├── api/client.js
 │       └── pages/backtest.js
 ├── docs/
-│   └── factor-module-api.md       # 面向 Nova 的因子 API 说明
+│   ├── factor-module-api.md       # 面向 Nova 的因子 API 说明
+│   └── images/
+│       ├── platform-page.png      # README 主平台截图
+│       └── backtest-page.png      # README 策略验证截图
+├── scripts/
+│   └── deploy_mac.py              # macOS 部署脚本（建库 + 拉 baostock + 启动）
+├── CHANGELOG.md
 └── README.md
 ```
 
@@ -127,6 +155,36 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend
 - `http://127.0.0.1:8000/#/backtest`
 
 当前默认是**无登录模式**。
+
+## macOS 部署
+
+当前仓库新增了一个面向 macOS 的部署脚本：
+
+- `scripts/deploy_mac.py`
+
+它会按顺序完成：
+
+1. 创建 `.venv`
+2. 安装 `backend/requirements.txt`
+3. 初始化 SQLite 数据库
+4. 直接通过 baostock 做全量下载（默认 `--download-mode full`）
+5. 启动本地 FastAPI 服务
+
+最常用的两种方式：
+
+```bash
+python3 scripts/deploy_mac.py --dry-run
+python3 scripts/deploy_mac.py
+```
+
+如果你只想看将要执行什么命令，用 `--dry-run`；如果要调整下载模式，也可以显式传：
+
+```bash
+python3 scripts/deploy_mac.py --download-mode test
+python3 scripts/deploy_mac.py --download-mode update
+```
+
+后续只要项目的依赖、建库流程、下载链路或启动命令发生变化，都应该同步更新这个脚本，避免 README 和实际部署流程脱节。
 
 ## 因子模块能力
 

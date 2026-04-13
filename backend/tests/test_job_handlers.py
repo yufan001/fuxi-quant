@@ -69,6 +69,30 @@ class JobHandlerTests(unittest.TestCase):
         self.assertEqual(result['target_path'], str(dest))
         self.assertTrue(any(item['name'] == 'import_report.json' for item in context.artifacts))
 
+    def test_data_import_db_job_refreshes_parquet_mirror_after_copy(self):
+        src_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(src_dir.cleanup)
+        src = Path(src_dir.name) / 'source.db'
+        conn = sqlite3.connect(src)
+        conn.execute('CREATE TABLE stock_info (code TEXT PRIMARY KEY)')
+        conn.execute("INSERT INTO stock_info (code) VALUES ('AAA')")
+        conn.commit()
+        conn.close()
+
+        context = self.make_context({'source_path': str(src), 'replace_existing': True})
+        dest_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(dest_dir.cleanup)
+        dest = Path(dest_dir.name) / 'market.db'
+
+        mock_storage = MagicMock()
+        mock_storage.get_all_stock_codes.return_value = ['AAA']
+
+        with patch('app.core.job_handlers.MARKET_DB_PATH', dest), patch('app.core.job_handlers.MarketStorage', return_value=mock_storage):
+            result = data_import_db_job(context)
+
+        mock_storage.sync_parquet_tables.assert_called_once_with(['AAA'], periods=['d', 'w', 'm'])
+        self.assertEqual(result['parquet_sync_codes'], 1)
+
 
 if __name__ == '__main__':
     unittest.main()

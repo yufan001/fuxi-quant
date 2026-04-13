@@ -2,6 +2,10 @@ import sqlite3
 from collections import OrderedDict
 from datetime import date
 from typing import Optional
+
+from app.core.config import MARKET_PARQUET_DIR
+from app.data.duckdb_market_query import DuckDbMarketQuery
+from app.data.parquet_market_store import ParquetMarketStore
 from app.models.db import get_market_db
 
 
@@ -16,6 +20,12 @@ def _period_key(day: str, period: str) -> str:
 
 
 class MarketStorage:
+
+    def __init__(self, parquet_root=None, parquet_store=None, duckdb_query=None):
+        parquet_root = parquet_root or MARKET_PARQUET_DIR
+        self.parquet_root = parquet_root
+        self.parquet_store = parquet_store or ParquetMarketStore(parquet_root)
+        self.duckdb_query = duckdb_query or DuckDbMarketQuery(parquet_root)
 
     def save_stock_daily(self, records: list[dict]):
         if not records:
@@ -178,7 +188,30 @@ class MarketStorage:
         conn.close()
         return [r["code"] for r in rows]
 
-    def get_histories(self, codes: list[str], start_date: Optional[str] = None, end_date: Optional[str] = None) -> dict[str, list[dict]]:
+    def sync_parquet_tables(self, codes: list[str], periods: list[str] | None = None):
+        periods = periods or ["d", "w", "m"]
+        table_map = {"d": "stock_daily", "w": "stock_weekly", "m": "stock_monthly"}
+        unique_codes = sorted(set(codes))
+        if not unique_codes:
+            return
+
+        conn = get_market_db()
+        try:
+            for code in unique_codes:
+                for period in periods:
+                    table = table_map[period]
+                    rows = [
+                        dict(r)
+                        for r in conn.execute(
+                            f"SELECT * FROM {table} WHERE code = ? ORDER BY date ASC",
+                            (code,),
+                        ).fetchall()
+                    ]
+                    self.parquet_store.replace_code_rows(table, code, rows)
+        finally:
+            conn.close()
+
+    def _get_histories_from_sqlite(self, codes: list[str], start_date: Optional[str] = None, end_date: Optional[str] = None) -> dict[str, list[dict]]:
         if not codes:
             return {}
 
@@ -201,6 +234,20 @@ class MarketStorage:
         for row in rows:
             grouped[row["code"]].append(dict(row))
         return grouped
+
+    def get_histories(self, codes: list[str], start_date: Optional[str] = None, end_date: Optional[str] = None) -> dict[str, list[dict]]:
+        if not codes:
+            return {}
+
+        parquet_grouped = self.duckdb_query.get_histories(codes, start_date, end_date)
+        missing_codes = [code for code, rows in parquet_grouped.items() if not rows]
+        if not missing_codes:
+            return parquet_grouped
+
+        sqlite_grouped = self._get_histories_from_sqlite(missing_codes, start_date, end_date)
+        for code in missing_codes:
+            parquet_grouped[code] = sqlite_grouped.get(code, [])
+        return parquet_grouped
 
     def get_trade_dates(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> list[str]:
         conn = get_market_db()

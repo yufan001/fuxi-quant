@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.data.storage import MarketStorage
@@ -107,6 +109,23 @@ class MarketStorageTests(unittest.TestCase):
 
         self.assertEqual([row["date"] for row in histories["AAA"]], ["2024-01-02", "2024-01-03"])
         self.assertEqual([row["date"] for row in histories["BBB"]], ["2024-01-02"])
+
+    def test_get_histories_prefers_parquet_mirror_when_available(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            parquet_root = Path(tmpdir)
+            (parquet_root / "stock_daily").mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(
+                [
+                    {"code": "AAA", "date": "2024-01-02", "close": 100.0, "amount": 9000.0, "turn": 9.0, "pbMRQ": 0.9},
+                    {"code": "AAA", "date": "2024-01-03", "close": 110.0, "amount": 9900.0, "turn": 9.9, "pbMRQ": 0.8},
+                ]
+            ).to_parquet(parquet_root / "stock_daily" / "AAA.parquet", index=False)
+
+            storage = MarketStorage(parquet_root=parquet_root)
+            with patch("app.data.storage.get_market_db", return_value=self.conn):
+                histories = storage.get_histories(["AAA"], start_date="2024-01-02", end_date="2024-01-03")
+
+        self.assertEqual([row["close"] for row in histories["AAA"]], [100.0, 110.0])
 
     def test_get_trade_dates_returns_trading_days_only(self):
         storage = MarketStorage()

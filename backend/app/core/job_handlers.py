@@ -52,10 +52,15 @@ def data_import_db_job(context):
         raise FileExistsError(f'目标数据库已存在: {MARKET_DB_PATH}')
 
     shutil.copy2(source_path, MARKET_DB_PATH)
+    storage = MarketStorage()
+    codes = storage.get_all_stock_codes()
+    if codes:
+        storage.sync_parquet_tables(codes, periods=['d', 'w', 'm'])
     report = {
         'source_path': str(source_path),
         'target_path': str(MARKET_DB_PATH),
         'size_bytes': source_path.stat().st_size,
+        'parquet_sync_codes': len(codes),
     }
     context.log(f'imported database from {source_path}')
     context.set_summary(report)

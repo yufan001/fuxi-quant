@@ -98,7 +98,9 @@ class DataDownloader:
         print()
         print(f"[完成] 下载完成: {downloaded} 成功, {len(failed)} 失败")
         if updated_codes:
-            self.storage.rebuild_aggregates(sorted(set(updated_codes)), periods=["weekly", "monthly"])
+            touched_codes = sorted(set(updated_codes))
+            self.storage.rebuild_aggregates(touched_codes, periods=["weekly", "monthly"])
+            self.storage.sync_parquet_tables(touched_codes, periods=["d", "w", "m"])
         if failed:
             print(f"[失败列表] {failed[:10]}{'...' if len(failed) > 10 else ''}")
 

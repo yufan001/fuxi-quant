@@ -89,13 +89,14 @@ class MarketAggregateRebuildTests(unittest.TestCase):
         self.assertEqual(rows[0]["close"], 12)
         self.assertEqual(rows[1]["close"], 14)
 
-    def test_download_daily_data_rebuilds_aggregates_for_updated_codes(self):
+    def test_download_daily_data_rebuilds_aggregates_and_syncs_parquet_for_updated_codes(self):
         from app.data.downloader import DataDownloader
 
         downloader = DataDownloader()
         downloader.storage = MagicMock()
         downloader.storage.get_latest_date.return_value = None
         downloader.storage.rebuild_aggregates = MagicMock()
+        downloader.storage.sync_parquet_tables = MagicMock()
         downloader.provider = MagicMock()
         downloader.provider.get_daily.return_value = MagicMock(
             empty=False,
@@ -121,6 +122,7 @@ class MarketAggregateRebuildTests(unittest.TestCase):
         downloader.download_daily_data(codes=["AAA"], start_date="2024-02-01", end_date="2024-02-02")
 
         downloader.storage.rebuild_aggregates.assert_called_once_with(["AAA"], periods=["weekly", "monthly"])
+        downloader.storage.sync_parquet_tables.assert_called_once_with(["AAA"], periods=["d", "w", "m"])
 
     def test_rebuild_aggregates_skips_rows_with_missing_ohlc(self):
         conn = self.make_conn()
