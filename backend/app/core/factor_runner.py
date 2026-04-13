@@ -23,7 +23,10 @@ class FactorScriptExecutionError(Exception):
 
 
 def _script_timeout_seconds(request) -> float:
-    return float(getattr(request, "script_timeout_seconds", 10.0))
+    configured = getattr(request, "script_timeout_seconds", None)
+    if configured is None:
+        return 10.0
+    return float(configured)
 
 
 def _script_worker_entry(result_queue, script: str, history_frame_records: list[dict], rebalance_dates: list[str], context_base: dict):

@@ -3,6 +3,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from pydantic import ValidationError
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.api.jobs import (
@@ -74,6 +76,20 @@ class JobApiEndpointTests(unittest.TestCase):
         self.assertEqual(manager.calls[0]['payload']['strategy_id'], 'custom_factor_script')
         self.assertEqual(manager.calls[0]['callback']['url'], 'http://nova.local/webhook')
 
+    def test_submit_factor_job_forwards_script_timeout_seconds(self):
+        manager = FakeManager()
+        request = FactorJobRequest(
+            script='def score_stocks(histories, context):\n    return {}',
+            start_date='2023-01-01',
+            end_date='2024-12-31',
+            script_timeout_seconds=3.5,
+        )
+
+        with patch('app.api.jobs.get_job_manager', return_value=manager):
+            submit_factor_job(request)
+
+        self.assertEqual(manager.calls[0]['payload']['script_timeout_seconds'], 3.5)
+
     def test_submit_data_import_job_enqueues_import_task(self):
         manager = FakeManager()
         request = DataImportDBRequest(source_path='D:/AAA/seed/market.db', replace_existing=True)
@@ -84,6 +100,15 @@ class JobApiEndpointTests(unittest.TestCase):
         self.assertEqual(response['data']['job_id'], 'job_test_1')
         self.assertEqual(manager.calls[0]['job_type'], 'data_import_db')
         self.assertEqual(manager.calls[0]['payload']['source_path'], 'D:/AAA/seed/market.db')
+
+    def test_factor_job_request_rejects_non_positive_script_timeout_seconds(self):
+        with self.assertRaises(ValidationError):
+            FactorJobRequest(
+                script='def score_stocks(histories, context):\n    return {}',
+                start_date='2023-01-01',
+                end_date='2024-12-31',
+                script_timeout_seconds=0,
+            )
 
     def test_submit_data_update_job_enqueues_update_task(self):
         manager = FakeManager()

@@ -4,7 +4,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.engine import BacktestEngine
 from app.core.factor_runner import FactorScriptExecutionError, run_factor_job
@@ -42,6 +42,7 @@ class FactorBacktestRequest(BaseModel):
     rebalance: str = "monthly"
     rebalance_dates: list[str] = []
     pool_codes: Optional[list[str]] = None
+    script_timeout_seconds: Optional[float] = Field(default=None, gt=0)
 
 
 FACTOR_TEMPLATES = [

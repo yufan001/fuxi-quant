@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -200,6 +201,32 @@ class FactorApiTests(unittest.TestCase):
             response = run_factor_backtest_job(request)
 
         self.assertEqual(response["data"]["rebalances"][0]["selected"][0]["code"], "AAA")
+
+    def test_run_factor_backtest_job_forwards_script_timeout_seconds(self):
+        request = FactorBacktestRequest(
+            script='def score_stocks(histories, context):\n    return {}',
+            start_date="2024-01-01",
+            end_date="2024-01-22",
+            script_timeout_seconds=4.0,
+        )
+
+        with patch("app.api.backtest.MarketStorage") as storage_factory, patch(
+            "app.api.backtest.get_market_db", side_effect=self.make_conn
+        ), patch("app.api.backtest.run_factor_job", return_value={"metrics": {}, "equity_curve": [], "rebalances": [], "pool_size": 0, "rebalance": "monthly"}) as run_job:
+            response = run_factor_backtest_job(request)
+
+        self.assertIn("run_id", response["data"])
+        self.assertEqual(run_job.call_args.args[1].script_timeout_seconds, 4.0)
+        storage_factory.assert_called_once()
+
+    def test_factor_backtest_request_rejects_non_positive_script_timeout_seconds(self):
+        with self.assertRaises(ValidationError):
+            FactorBacktestRequest(
+                script='def score_stocks(histories, context):\n    return {}',
+                start_date="2024-01-01",
+                end_date="2024-01-22",
+                script_timeout_seconds=0,
+            )
 
     def test_get_factor_backtest_result_reads_saved_run(self):
         payload = {"metrics": {"final_equity": 123456.78}, "equity_curve": [], "rebalances": []}

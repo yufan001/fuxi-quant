@@ -247,6 +247,10 @@ def select_portfolio(histories, context):
 
 其中 `score_frame()` / `score_stocks()` / `select_portfolio()` 三种脚本协议都会经过统一的受控执行路径；超时和取消状态会通过同步 API、异步 Job API 和 MCP 查询接口返回结构化结果。
 
+可选参数：
+
+- `script_timeout_seconds`：脚本执行超时秒数，必须是正数；默认 `10` 秒，可在同步 API、异步 Job API 和 MCP 提交时覆盖。
+
 ## 核心 API
 
 ### 获取策略列表

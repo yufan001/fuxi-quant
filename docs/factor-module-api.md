@@ -23,8 +23,9 @@
 2. **Python 脚本因子策略**
    - 支持在前端**上传 `.py` 文件**
    - 支持在前端**直接新增 / 编辑 Python 脚本**
-   - 支持两种脚本协议：
+   - 支持三种脚本协议：
      - `score_stocks(histories, context)`：脚本返回每只股票分数，平台负责选股/调仓
+     - `score_frame(frame, context)`：脚本直接接收表格化历史数据，适合向量化打分
      - `select_portfolio(histories, context)`：脚本直接返回目标组合，平台负责执行回测
 
 ## 认证 / 调用方式
@@ -160,6 +161,8 @@ Content-Type: application/json
 
 如果 `strategy_id` 对应的策略保存了 `code` 和默认 `params`，后端会自动补齐脚本、`top_n` 和 `rebalance` 等配置。
 
+脚本请求还支持可选字段 `script_timeout_seconds`，必须是正数；未传时默认使用 `10` 秒。
+
 ### 返回格式
 
 ```json
@@ -224,6 +227,7 @@ Content-Type: application/json
   "start_date": "2023-01-01",
   "end_date": "2024-12-31",
   "pool_codes": ["sh.600000", "sz.000001"],
+  "script_timeout_seconds": 15,
   "callback_url": "http://127.0.0.1:18790/api/fuxi/webhook",
   "callback_secret": "your-shared-secret"
 }

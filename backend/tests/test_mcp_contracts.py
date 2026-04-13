@@ -9,7 +9,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.mcp_server import cancel_job_tool, get_job_logs_tool, get_job_result_tool, get_job_status_tool, mcp
+from app.mcp_server import cancel_job_tool, get_job_logs_tool, get_job_result_tool, get_job_status_tool, mcp, submit_factor_backtest_tool
 
 
 class MCPContractTests(unittest.TestCase):
@@ -66,6 +66,25 @@ class MCPContractTests(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_submit_factor_backtest_tool_forwards_script_timeout_seconds(self):
+        async def run_test():
+            client = self.make_client()
+            client.post.return_value = self.make_response({'data': {'job_id': 'job_123', 'status': 'queued'}})
+
+            with patch('app.mcp_server.httpx.AsyncClient', return_value=client):
+                result = await submit_factor_backtest_tool(
+                    base_url='http://127.0.0.1:8000',
+                    start_date='2024-01-01',
+                    end_date='2024-01-31',
+                    script='def score_stocks(histories, context):\n    return {}',
+                    script_timeout_seconds=6.0,
+                )
+
+            self.assertTrue(result['ok'])
+            self.assertEqual(client.post.await_args.kwargs['json']['script_timeout_seconds'], 6.0)
+
+        asyncio.run(run_test())
+
     def test_cancel_job_tool_returns_job_cancel_failed_error_when_upstream_rejects_cancel(self):
         async def run_test():
             client = self.make_client()
@@ -78,6 +97,25 @@ class MCPContractTests(unittest.TestCase):
             self.assertFalse(result['ok'])
             self.assertIsNone(result['data'])
             self.assertEqual(result['error']['code'], 'job_cancel_failed')
+
+        asyncio.run(run_test())
+
+    def test_submit_factor_backtest_tool_rejects_non_positive_script_timeout_seconds(self):
+        async def run_test():
+            client = self.make_client()
+
+            with patch('app.mcp_server.httpx.AsyncClient', return_value=client):
+                result = await submit_factor_backtest_tool(
+                    base_url='http://127.0.0.1:8000',
+                    start_date='2024-01-01',
+                    end_date='2024-01-31',
+                    script='def score_stocks(histories, context):\n    return {}',
+                    script_timeout_seconds=0,
+                )
+
+            self.assertFalse(result['ok'])
+            self.assertEqual(result['error']['code'], 'invalid_arguments')
+            client.post.assert_not_awaited()
 
         asyncio.run(run_test())
 

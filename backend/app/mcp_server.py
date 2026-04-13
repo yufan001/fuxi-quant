@@ -72,7 +72,11 @@ async def submit_factor_backtest_tool(
     pool_codes: list[str] | None = None,
     callback_url: str | None = None,
     callback_secret: str | None = None,
+    script_timeout_seconds: float | None = None,
 ):
+    if script_timeout_seconds is not None and script_timeout_seconds <= 0:
+        return _error_response(JobResponse, 'invalid_arguments', 'script_timeout_seconds must be greater than 0')
+
     payload = {
         'strategy_id': strategy_id,
         'script': script,
@@ -85,6 +89,7 @@ async def submit_factor_backtest_tool(
         'pool_codes': pool_codes,
         'callback_url': callback_url,
         'callback_secret': callback_secret,
+        'script_timeout_seconds': script_timeout_seconds,
     }
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -346,8 +351,9 @@ async def submit_factor_backtest_mcp(
     pool_codes: list[str] | None = None,
     callback_url: str | None = None,
     callback_secret: str | None = None,
+    script_timeout_seconds: float | None = None,
 ) -> JobResponse:
-    return await submit_factor_backtest_tool(base_url, start_date, end_date, strategy_id, script, factor_configs, top_n, capital, rebalance, pool_codes, callback_url, callback_secret)
+    return await submit_factor_backtest_tool(base_url, start_date, end_date, strategy_id, script, factor_configs, top_n, capital, rebalance, pool_codes, callback_url, callback_secret, script_timeout_seconds)
 
 
 @mcp.tool(name='get_job_status')

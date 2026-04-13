@@ -19,3 +19,4 @@
 
 ### Changed
 - Sync API, job results, and MCP wrappers now preserve structured factor-script failure payloads instead of exposing only plain error strings.
+- Sync factor backtest API, async factor job API, and MCP submission tool now accept optional `script_timeout_seconds` and reject non-positive values.
