@@ -210,16 +210,24 @@ python3 scripts/deploy_mac.py --download-mode update
 
 ### 2. Python 脚本因子策略
 
-支持两种脚本协议：
+支持三种脚本协议：
 
-#### A. 分数脚本
+#### A. 旧版分数脚本（兼容保留）
 
 ```python
 def score_stocks(histories, context):
     return {code: rows[-1]["close"] for code, rows in histories.items()}
 ```
 
-#### B. 组合脚本
+#### B. 新版表格分数脚本（推荐）
+
+```python
+def score_frame(frame, context):
+    latest = frame.sort_values(["code", "date"]).groupby("code").tail(1)
+    return dict(zip(latest["code"], latest["close"]))
+```
+
+#### C. 旧版组合脚本（兼容保留）
 
 ```python
 def select_portfolio(histories, context):

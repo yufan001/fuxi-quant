@@ -11,3 +11,7 @@
 ### Changed
 - Kept business data on SQLite while starting the Phase 1 storage-decoupling rollout for heavy market reads.
 - Updated README to document the market storage layout and macOS deployment workflow.
+- Builtin factor backtests now compute from a frame-oriented pipeline while preserving legacy `histories` script compatibility.
+
+### Added
+- Added a frame-based factor history path and `score_frame(frame, context)` script protocol for vectorized factor execution.
