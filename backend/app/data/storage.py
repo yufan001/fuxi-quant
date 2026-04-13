@@ -3,6 +3,8 @@ from collections import OrderedDict
 from datetime import date
 from typing import Optional
 
+import pandas as pd
+
 from app.core.config import MARKET_PARQUET_DIR
 from app.data.duckdb_market_query import DuckDbMarketQuery
 from app.data.parquet_market_store import ParquetMarketStore
@@ -210,6 +212,73 @@ class MarketStorage:
                     self.parquet_store.replace_code_rows(table, code, rows)
         finally:
             conn.close()
+
+    def _get_history_frame_from_sqlite(
+        self,
+        codes: list[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        columns: list[str] | None = None,
+    ) -> pd.DataFrame:
+        selected_columns = columns or [
+            "code",
+            "date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "amount",
+            "turn",
+            "peTTM",
+            "pbMRQ",
+            "psTTM",
+            "pcfNcfTTM",
+        ]
+        if not codes:
+            return pd.DataFrame(columns=selected_columns)
+
+        conn = get_market_db()
+        placeholders = ",".join("?" for _ in codes)
+        sql = f"SELECT {', '.join(selected_columns)} FROM stock_daily WHERE code IN ({placeholders})"
+        params: list = list(codes)
+        if start_date:
+            sql += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            sql += " AND date <= ?"
+            params.append(end_date)
+        sql += " ORDER BY code ASC, date ASC"
+        rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        conn.close()
+        return pd.DataFrame(rows, columns=selected_columns)
+
+    def get_history_frame(
+        self,
+        codes: list[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        columns: list[str] | None = None,
+    ) -> pd.DataFrame:
+        selected_columns = columns or [
+            "code",
+            "date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "amount",
+            "turn",
+            "peTTM",
+            "pbMRQ",
+            "psTTM",
+            "pcfNcfTTM",
+        ]
+        frame = self.duckdb_query.get_history_frame(codes, start_date, end_date, columns=selected_columns)
+        if not frame.empty or not codes:
+            return frame
+        return self._get_history_frame_from_sqlite(codes, start_date, end_date, columns=selected_columns)
 
     def _get_histories_from_sqlite(self, codes: list[str], start_date: Optional[str] = None, end_date: Optional[str] = None) -> dict[str, list[dict]]:
         if not codes:
