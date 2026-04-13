@@ -1,6 +1,9 @@
 from collections import OrderedDict
 
+import pandas as pd
+
 from app.core.factor_backtest import FactorBacktestConfig, run_factor_backtest, run_selection_backtest
+from app.core.factor_frame import DEFAULT_FACTOR_COLUMNS, frame_to_histories, slice_frame_until
 
 HISTORY_BATCH_SIZE = 200
 
@@ -42,9 +45,10 @@ def _load_script_entrypoints(script: str):
     exec(script, {}, namespace)
     score_stocks = namespace.get("score_stocks")
     select_portfolio = namespace.get("select_portfolio")
-    if not callable(score_stocks) and not callable(select_portfolio):
-        raise ValueError("脚本必须定义 score_stocks(histories, context) 或 select_portfolio(histories, context)")
-    return score_stocks, select_portfolio
+    score_frame = namespace.get("score_frame")
+    if not callable(score_stocks) and not callable(select_portfolio) and not callable(score_frame):
+        raise ValueError("脚本必须定义 score_stocks(histories, context)、select_portfolio(histories, context) 或 score_frame(frame, context)")
+    return score_stocks, select_portfolio, score_frame
 
 
 def _normalize_portfolio_selection(selection) -> list[dict]:
@@ -59,15 +63,19 @@ def _normalize_portfolio_selection(selection) -> list[dict]:
     return normalized
 
 
-def _build_script_rebalances(histories: dict[str, list[dict]], request, rebalance_dates: list[str], progress_callback=None, assert_not_cancelled=None) -> list[dict]:
-    score_stocks, select_portfolio = _load_script_entrypoints(request.script)
+def _build_script_rebalances(history_frame: pd.DataFrame, histories: dict[str, list[dict]], request, rebalance_dates: list[str], progress_callback=None, assert_not_cancelled=None) -> list[dict]:
+    score_stocks, select_portfolio, score_frame = _load_script_entrypoints(request.script)
     rebalances = []
 
     total_rebalances = len(rebalance_dates)
     for index, rebalance_date in enumerate(rebalance_dates, start=1):
         if assert_not_cancelled:
             assert_not_cancelled()
-        snapshot_histories = {code: _history_until(history, rebalance_date) for code, history in histories.items()}
+        snapshot_frame = slice_frame_until(history_frame, rebalance_date)
+        if callable(score_frame):
+            snapshot_histories = frame_to_histories(snapshot_frame)
+        else:
+            snapshot_histories = {code: _history_until(history, rebalance_date) for code, history in histories.items()}
         snapshot_histories = {code: rows for code, rows in snapshot_histories.items() if rows}
         context = {
             "date": rebalance_date,
@@ -77,7 +85,11 @@ def _build_script_rebalances(histories: dict[str, list[dict]], request, rebalanc
             "top_n": request.top_n,
         }
 
-        if callable(score_stocks):
+        if callable(score_frame):
+            scores = score_frame(snapshot_frame, context) or {}
+            ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)[: request.top_n]
+            selected = [{"code": code, "score": float(score)} for code, score in ranked if code in snapshot_histories]
+        elif callable(score_stocks):
             scores = score_stocks(snapshot_histories, context) or {}
             ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)[: request.top_n]
             selected = [{"code": code, "score": float(score)} for code, score in ranked if code in snapshot_histories]
@@ -109,6 +121,21 @@ def run_factor_job(storage, request, progress_callback=None, log_callback=None, 
         log_callback=log_callback,
         assert_not_cancelled=assert_not_cancelled,
     )
+    history_frame = storage.get_history_frame(
+        pool_codes,
+        request.start_date,
+        request.end_date,
+        columns=DEFAULT_FACTOR_COLUMNS,
+    )
+    if not isinstance(history_frame, pd.DataFrame):
+        history_frame = pd.DataFrame(
+            [
+                {**row, "code": code}
+                for code, history in histories.items()
+                for row in history
+            ],
+            columns=DEFAULT_FACTOR_COLUMNS,
+        )
 
     if request.pool_codes:
         eligible_codes = request.pool_codes
@@ -125,6 +152,7 @@ def run_factor_job(storage, request, progress_callback=None, log_callback=None, 
         result = run_selection_backtest(
             histories,
             _build_script_rebalances(
+                history_frame,
                 histories,
                 request,
                 rebalance_dates,

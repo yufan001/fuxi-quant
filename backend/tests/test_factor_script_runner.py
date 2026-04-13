@@ -4,6 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.factor_runner import run_factor_job
@@ -68,6 +70,39 @@ class FactorScriptRunnerTests(unittest.TestCase):
 
         self.assertEqual(result["rebalances"][0]["selected"][0]["code"], "BBB")
         self.assertGreater(result["metrics"]["final_equity"], 100000)
+
+    def test_run_factor_job_supports_score_frame_scripts(self):
+        history_frame = pd.DataFrame(
+            [
+                {"code": "AAA", "date": f"2024-01-{day:02d}", "close": 100 + day * 2.0, "pbMRQ": 1.0}
+                for day in range(1, 23)
+            ]
+            + [
+                {"code": "BBB", "date": f"2024-01-{day:02d}", "close": 100 + day * 0.5, "pbMRQ": 2.0}
+                for day in range(1, 23)
+            ]
+        )
+        self.storage.get_history_frame.return_value = history_frame
+        self.storage.get_histories.return_value = {
+            "AAA": make_history(100, 2.0),
+            "BBB": make_history(100, 0.5),
+        }
+
+        request = SimpleNamespace(
+            script='def score_frame(frame, context):\n    latest = frame.sort_values(["code", "date"]).groupby("code").tail(1)\n    return dict(zip(latest["code"], latest["close"]))',
+            factor_configs=[],
+            top_n=1,
+            start_date="2024-01-01",
+            end_date="2024-01-22",
+            capital=100000,
+            rebalance="monthly",
+            rebalance_dates=["2024-01-21"],
+            pool_codes=["AAA", "BBB"],
+        )
+
+        result = run_factor_job(self.storage, request)
+
+        self.assertEqual(result["rebalances"][0]["selected"][0]["code"], "AAA")
 
 
 if __name__ == "__main__":

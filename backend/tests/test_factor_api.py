@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.api.backtest import FactorBacktestRequest, get_factor_backtest_result, run_factor_backtest_job
@@ -150,6 +152,40 @@ class FactorApiTests(unittest.TestCase):
 
         request = FactorBacktestRequest(
             strategy_id="custom_factor_script",
+            factor_configs=[],
+            top_n=1,
+            start_date="2024-01-01",
+            end_date="2024-01-22",
+            rebalance_dates=["2024-01-21"],
+            pool_codes=["AAA", "BBB"],
+        )
+
+        with patch("app.api.backtest.MarketStorage", return_value=mock_storage), patch(
+            "app.api.backtest.get_market_db", side_effect=self.make_conn
+        ):
+            response = run_factor_backtest_job(request)
+
+        self.assertEqual(response["data"]["rebalances"][0]["selected"][0]["code"], "AAA")
+
+    def test_run_factor_backtest_job_accepts_score_frame_script(self):
+        mock_storage = MagicMock()
+        mock_storage.get_history_frame.return_value = pd.DataFrame(
+            [
+                {"code": "AAA", "date": f"2024-01-{day:02d}", "close": 100 + day * 2.0, "pbMRQ": 1.0}
+                for day in range(1, 23)
+            ]
+            + [
+                {"code": "BBB", "date": f"2024-01-{day:02d}", "close": 100 + day * 0.5, "pbMRQ": 2.0}
+                for day in range(1, 23)
+            ]
+        )
+        mock_storage.get_histories.return_value = {
+            "AAA": make_history(100, 2.0, 1.4, -0.01),
+            "BBB": make_history(100, 0.8, 2.0, 0.01),
+        }
+
+        request = FactorBacktestRequest(
+            script='def score_frame(frame, context):\n    latest = frame.sort_values(["code", "date"]).groupby("code").tail(1)\n    return dict(zip(latest["code"], latest["close"]))',
             factor_configs=[],
             top_n=1,
             start_date="2024-01-01",
