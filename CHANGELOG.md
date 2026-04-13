@@ -15,3 +15,7 @@
 
 ### Added
 - Added a frame-based factor history path and `score_frame(frame, context)` script protocol for vectorized factor execution.
+- Added a supervised worker-process sandbox for factor scripts with `success`, `script_error`, `timeout`, and `cancelled` terminal states.
+
+### Changed
+- Sync API, job results, and MCP wrappers now preserve structured factor-script failure payloads instead of exposing only plain error strings.

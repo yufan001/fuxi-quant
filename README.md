@@ -236,6 +236,17 @@ def select_portfolio(histories, context):
     ]
 ```
 
+### 脚本执行稳定性
+
+脚本型因子任务现在有 4 种终态：
+
+- `success`
+- `script_error`
+- `timeout`
+- `cancelled`
+
+其中 `score_frame()` / `score_stocks()` / `select_portfolio()` 三种脚本协议都会经过统一的受控执行路径；超时和取消状态会通过同步 API、异步 Job API 和 MCP 查询接口返回结构化结果。
+
 ## 核心 API
 
 ### 获取策略列表

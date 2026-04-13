@@ -9,7 +9,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.mcp_server import cancel_job_tool, get_job_logs_tool, get_job_status_tool, mcp
+from app.mcp_server import cancel_job_tool, get_job_logs_tool, get_job_result_tool, get_job_status_tool, mcp
 
 
 class MCPContractTests(unittest.TestCase):
@@ -134,6 +134,23 @@ class MCPContractTests(unittest.TestCase):
 
             self.assertEqual(len(content), 1)
             self.assertEqual(json.loads(content[0].text), structured)
+
+        asyncio.run(run_test())
+
+    def test_get_job_result_tool_returns_structured_timeout_payload(self):
+        async def run_test():
+            client = self.make_client()
+            client.get.side_effect = [
+                self.make_response({'data': {'id': 'job_123', 'status': 'failed'}}),
+                self.make_response({'data': {'status': 'timeout', 'error': {'code': 'script_timeout', 'message': 'script timeout'}}}),
+            ]
+
+            with patch('app.mcp_server.httpx.AsyncClient', return_value=client):
+                result = await get_job_result_tool(base_url='http://127.0.0.1:8000', job_id='job_123')
+
+            self.assertTrue(result['ok'])
+            self.assertEqual(result['data']['result']['status'], 'timeout')
+            self.assertEqual(result['data']['result']['error']['code'], 'script_timeout')
 
         asyncio.run(run_test())
 

@@ -16,6 +16,8 @@ data/market/parquet/
 data/db/*.db
 data/db/job_artifacts/
 *.db
+*.db-shm
+*.db-wal
 docs/superpowers/plans/
 docs/superpowers/specs/
 .idea/
