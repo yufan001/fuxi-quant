@@ -23,6 +23,10 @@ class ChunkedStorage:
         self.calls.append(list(codes))
         return {code: [] for code in codes}
 
+    def get_history_frame(self, codes, start_date=None, end_date=None, columns=None):
+        import pandas as pd
+        return pd.DataFrame([{"code": "AAA", "date": "2024-01-02", "close": 10.0}])
+
     def get_trade_dates(self, start_date=None, end_date=None):
         return []
 
@@ -52,6 +56,30 @@ class FactorJobCancellationTests(unittest.TestCase):
             run_factor_job(storage, request, assert_not_cancelled=assert_not_cancelled)
 
         self.assertGreaterEqual(len(storage.calls), 1)
+
+    def test_run_factor_job_cancels_long_running_script_worker(self):
+        storage = ChunkedStorage()
+        request = SimpleNamespace(
+            pool_codes=['AAA'],
+            start_date='2023-01-01',
+            end_date='2024-12-31',
+            rebalance='monthly',
+            rebalance_dates=['2024-01-02'],
+            script='def score_frame(frame, context):\n    while True:\n        pass',
+            factor_configs=[],
+            top_n=10,
+            capital=100000,
+            script_timeout_seconds=30,
+        )
+        checks = {'count': 0}
+
+        def assert_not_cancelled():
+            checks['count'] += 1
+            if checks['count'] >= 2:
+                raise JobCancelledError('cancelled during script worker run')
+
+        with self.assertRaises(JobCancelledError):
+            run_factor_job(storage, request, assert_not_cancelled=assert_not_cancelled)
 
 
 if __name__ == '__main__':

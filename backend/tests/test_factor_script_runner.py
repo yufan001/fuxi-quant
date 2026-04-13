@@ -104,6 +104,23 @@ class FactorScriptRunnerTests(unittest.TestCase):
 
         self.assertEqual(result["rebalances"][0]["selected"][0]["code"], "AAA")
 
+    def test_run_factor_job_returns_timeout_error_for_slow_script(self):
+        request = SimpleNamespace(
+            script='def score_frame(frame, context):\n    while True:\n        pass',
+            factor_configs=[],
+            top_n=1,
+            start_date="2024-01-01",
+            end_date="2024-01-22",
+            capital=100000,
+            rebalance="monthly",
+            rebalance_dates=["2024-01-21"],
+            pool_codes=["AAA", "BBB"],
+            script_timeout_seconds=0.2,
+        )
+
+        with self.assertRaisesRegex(Exception, "timeout"):
+            run_factor_job(self.storage, request)
+
 
 if __name__ == "__main__":
     unittest.main()
