@@ -12,8 +12,12 @@ build/
 env/
 venv/
 data/market/*.db
+data/market/parquet/
 data/db/*.db
+data/db/job_artifacts/
 *.db
+docs/superpowers/plans/
+docs/superpowers/specs/
 .idea/
 .vscode/
 *.swp
