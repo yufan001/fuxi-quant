@@ -2,9 +2,11 @@ import sys
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.factor_backtest import FactorBacktestConfig, run_factor_backtest
+from app.core.factor_backtest import FactorBacktestConfig, run_factor_backtest, run_factor_backtest_from_frame
 
 
 def make_history(base_close: float, daily_step: float, base_pb: float, pb_step: float, days: int = 22):
@@ -61,6 +63,32 @@ class FactorBacktestTests(unittest.TestCase):
         result = run_factor_backtest(histories, config)
 
         self.assertEqual([item["code"] for item in result.rebalances[0]["selected"]], ["AAA"])
+
+    def test_run_factor_backtest_from_frame_selects_top_ranked_stock_and_grows_equity(self):
+        frame = pd.DataFrame(
+            [
+                {"code": "AAA", "date": f"2024-01-{day:02d}", "close": 100 + day * 2.0, "pbMRQ": 1.4 - day * 0.01}
+                for day in range(1, 23)
+            ]
+            + [
+                {"code": "BBB", "date": f"2024-01-{day:02d}", "close": 100 + day * 0.8, "pbMRQ": 2.0 + day * 0.01}
+                for day in range(1, 23)
+            ]
+        )
+        config = FactorBacktestConfig(
+            factor_configs=[
+                {"key": "pb", "weight": 0.5},
+                {"key": "momentum_20", "weight": 0.5},
+            ],
+            top_n=1,
+            initial_capital=100000,
+            rebalance_dates=["2024-01-21"],
+        )
+
+        result = run_factor_backtest_from_frame(frame, config)
+
+        self.assertEqual(result.rebalances[0]["selected"][0]["code"], "AAA")
+        self.assertGreater(result.metrics["final_equity"], config.initial_capital)
 
 
 if __name__ == "__main__":

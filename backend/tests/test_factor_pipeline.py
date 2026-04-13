@@ -2,10 +2,12 @@ import sys
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.factors.base import FactorDefinition, combine_factor_scores, rank_stocks
-from app.factors.builtin import build_builtin_definitions, compute_factor_values
+from app.factors.builtin import build_builtin_definitions, compute_factor_values, compute_factor_values_from_frame
 
 
 class FactorPipelineTests(unittest.TestCase):
@@ -86,6 +88,27 @@ class FactorPipelineTests(unittest.TestCase):
         self.assertAlmostEqual(values["pb"]["AAA"], histories["AAA"][-1]["pbMRQ"])
         expected_momentum = histories["AAA"][-1]["close"] / histories["AAA"][-21]["close"] - 1
         self.assertAlmostEqual(values["momentum_20"]["AAA"], expected_momentum)
+
+    def test_compute_factor_values_from_frame_uses_latest_snapshot_and_momentum(self):
+        definitions = build_builtin_definitions([
+            {"key": "pb", "weight": 0.5},
+            {"key": "momentum_20", "weight": 0.5},
+        ])
+        frame = pd.DataFrame(
+            [
+                {"code": "AAA", "date": f"2024-01-{day:02d}", "close": 100 + day, "pbMRQ": 2.0 - day * 0.02}
+                for day in range(1, 23)
+            ]
+            + [
+                {"code": "BBB", "date": f"2024-01-{day:02d}", "close": 80 + day * 0.5, "pbMRQ": 1.5 + day * 0.01}
+                for day in range(1, 23)
+            ]
+        )
+
+        values = compute_factor_values_from_frame(frame, definitions)
+
+        self.assertAlmostEqual(values["pb"]["AAA"], frame[frame["code"] == "AAA"].iloc[-1]["pbMRQ"])
+        self.assertAlmostEqual(values["momentum_20"]["AAA"], (122 / 102) - 1)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,12 @@
 from copy import deepcopy
 from dataclasses import dataclass, field
 
+import pandas as pd
+
 from app.core.engine import BacktestEngine
+from app.core.factor_frame import frame_to_histories, slice_frame_until
 from app.factors.base import combine_factor_scores, rank_stocks
-from app.factors.builtin import build_builtin_definitions, compute_factor_values
+from app.factors.builtin import build_builtin_definitions, compute_factor_values, compute_factor_values_from_frame
 
 
 @dataclass
@@ -167,8 +170,8 @@ def run_selection_backtest(
     )
 
 
-def run_factor_backtest(
-    histories_by_code: dict[str, list[dict]],
+def run_factor_backtest_from_frame(
+    history_frame: pd.DataFrame,
     config: FactorBacktestConfig,
     progress_callback=None,
     assert_not_cancelled=None,
@@ -182,16 +185,14 @@ def run_factor_backtest(
             rebalances=[],
         )
 
+    histories_by_code = frame_to_histories(history_frame)
     rebalances = []
     total_rebalances = len(rebalance_dates)
     for index, rebalance_date in enumerate(rebalance_dates, start=1):
         if assert_not_cancelled:
             assert_not_cancelled()
-        snapshot_histories = {
-            code: _history_until(history, rebalance_date)
-            for code, history in histories_by_code.items()
-        }
-        raw_values = compute_factor_values(snapshot_histories, definitions)
+        snapshot_frame = slice_frame_until(history_frame, rebalance_date)
+        raw_values = compute_factor_values_from_frame(snapshot_frame, definitions)
         selected = rank_stocks(combine_factor_scores(raw_values, definitions), config.top_n)
         rebalances.append({"date": rebalance_date, "selected": selected})
         if progress_callback:
@@ -201,6 +202,27 @@ def run_factor_backtest(
         histories_by_code,
         rebalances,
         config.initial_capital,
+        progress_callback=progress_callback,
+        assert_not_cancelled=assert_not_cancelled,
+    )
+
+
+def run_factor_backtest(
+    histories_by_code: dict[str, list[dict]],
+    config: FactorBacktestConfig,
+    progress_callback=None,
+    assert_not_cancelled=None,
+) -> FactorBacktestResult:
+    history_frame = pd.DataFrame(
+        [
+            {**row, "code": code}
+            for code, history in histories_by_code.items()
+            for row in history
+        ]
+    )
+    return run_factor_backtest_from_frame(
+        history_frame,
+        config,
         progress_callback=progress_callback,
         assert_not_cancelled=assert_not_cancelled,
     )
