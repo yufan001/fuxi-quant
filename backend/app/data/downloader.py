@@ -65,6 +65,7 @@ class DataDownloader:
         total = len(codes)
         downloaded = 0
         failed = []
+        updated_codes = []
 
         print(f"[下载] 日线数据: {total} 只股票 ({start_date} ~ {end_date})")
 
@@ -83,6 +84,7 @@ class DataDownloader:
                 if not df.empty:
                     records = df.to_dict("records")
                     self.storage.save_stock_daily(records)
+                    updated_codes.append(code)
                     downloaded += 1
                 else:
                     downloaded += 1
@@ -95,6 +97,8 @@ class DataDownloader:
 
         print()
         print(f"[完成] 下载完成: {downloaded} 成功, {len(failed)} 失败")
+        if updated_codes:
+            self.storage.rebuild_aggregates(sorted(set(updated_codes)), periods=["weekly", "monthly"])
         if failed:
             print(f"[失败列表] {failed[:10]}{'...' if len(failed) > 10 else ''}")
 

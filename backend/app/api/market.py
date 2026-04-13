@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from app.data.storage import MarketStorage
 
@@ -17,9 +17,13 @@ def get_kline(
     code: str,
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    period: str = Query("d"),
 ):
     storage = MarketStorage()
-    data = storage.get_daily(code, start_date, end_date)
+    try:
+        data = storage.get_kline_data(code, start_date, end_date, period=period)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"data": data}
 
 

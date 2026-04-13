@@ -2,6 +2,8 @@ from collections import OrderedDict
 
 from app.core.factor_backtest import FactorBacktestConfig, run_factor_backtest, run_selection_backtest
 
+HISTORY_BATCH_SIZE = 200
+
 
 def _pick_rebalance_dates(trade_dates: list[str], rebalance: str) -> list[str]:
     if not trade_dates:
@@ -16,6 +18,23 @@ def _pick_rebalance_dates(trade_dates: list[str], rebalance: str) -> list[str]:
 
 def _history_until(history: list[dict], as_of_date: str) -> list[dict]:
     return [row for row in history if row["date"] <= as_of_date]
+
+
+def _load_histories(storage, pool_codes, start_date, end_date, progress_callback=None, log_callback=None, assert_not_cancelled=None):
+    histories = {}
+    total_batches = max((len(pool_codes) + HISTORY_BATCH_SIZE - 1) // HISTORY_BATCH_SIZE, 1)
+    for index in range(total_batches):
+        if assert_not_cancelled:
+            assert_not_cancelled()
+        chunk = pool_codes[index * HISTORY_BATCH_SIZE:(index + 1) * HISTORY_BATCH_SIZE]
+        if not chunk:
+            continue
+        if log_callback:
+            log_callback(f'loading history batch {index + 1}/{total_batches}')
+        histories.update(storage.get_histories(chunk, start_date, end_date))
+        if progress_callback:
+            progress_callback(5 + (index + 1) / total_batches * 10, f'loading_histories_{index + 1}_of_{total_batches}')
+    return histories
 
 
 def _load_script_entrypoints(script: str):
@@ -40,11 +59,14 @@ def _normalize_portfolio_selection(selection) -> list[dict]:
     return normalized
 
 
-def _build_script_rebalances(histories: dict[str, list[dict]], request, rebalance_dates: list[str]) -> list[dict]:
+def _build_script_rebalances(histories: dict[str, list[dict]], request, rebalance_dates: list[str], progress_callback=None, assert_not_cancelled=None) -> list[dict]:
     score_stocks, select_portfolio = _load_script_entrypoints(request.script)
     rebalances = []
 
-    for rebalance_date in rebalance_dates:
+    total_rebalances = len(rebalance_dates)
+    for index, rebalance_date in enumerate(rebalance_dates, start=1):
+        if assert_not_cancelled:
+            assert_not_cancelled()
         snapshot_histories = {code: _history_until(history, rebalance_date) for code, history in histories.items()}
         snapshot_histories = {code: rows for code, rows in snapshot_histories.items() if rows}
         context = {
@@ -64,13 +86,29 @@ def _build_script_rebalances(histories: dict[str, list[dict]], request, rebalanc
             selected = [item for item in selected if item["code"] in snapshot_histories]
 
         rebalances.append({"date": rebalance_date, "selected": selected})
+        if progress_callback:
+            progress_callback(10 + index / max(total_rebalances, 1) * 20, f'script_rebalance_{index}_of_{total_rebalances}')
 
     return rebalances
 
 
-def run_factor_job(storage, request) -> dict:
+def run_factor_job(storage, request, progress_callback=None, log_callback=None, assert_not_cancelled=None) -> dict:
+    if log_callback:
+        log_callback('loading histories')
+    if progress_callback:
+        progress_callback(5, 'loading_histories')
+    if assert_not_cancelled:
+        assert_not_cancelled()
     pool_codes = request.pool_codes or storage.get_all_stock_codes() or sorted(storage.get_downloaded_codes())
-    histories = storage.get_histories(pool_codes, request.start_date, request.end_date)
+    histories = _load_histories(
+        storage,
+        pool_codes,
+        request.start_date,
+        request.end_date,
+        progress_callback=progress_callback,
+        log_callback=log_callback,
+        assert_not_cancelled=assert_not_cancelled,
+    )
 
     if request.pool_codes:
         eligible_codes = request.pool_codes
@@ -78,14 +116,24 @@ def run_factor_job(storage, request) -> dict:
         eligible_codes = [code for code, history in histories.items() if history]
         histories = {code: history for code, history in histories.items() if history}
 
+    if progress_callback:
+        progress_callback(8, 'loading_trade_dates')
     trade_dates = storage.get_trade_dates(request.start_date, request.end_date)
     rebalance_dates = request.rebalance_dates or _pick_rebalance_dates(trade_dates, request.rebalance)
 
     if getattr(request, "script", None):
         result = run_selection_backtest(
             histories,
-            _build_script_rebalances(histories, request, rebalance_dates),
+            _build_script_rebalances(
+                histories,
+                request,
+                rebalance_dates,
+                progress_callback=progress_callback,
+                assert_not_cancelled=assert_not_cancelled,
+            ),
             request.capital,
+            progress_callback=progress_callback,
+            assert_not_cancelled=assert_not_cancelled,
         )
     else:
         result = run_factor_backtest(
@@ -96,6 +144,8 @@ def run_factor_job(storage, request) -> dict:
                 initial_capital=request.capital,
                 rebalance_dates=rebalance_dates,
             ),
+            progress_callback=progress_callback,
+            assert_not_cancelled=assert_not_cancelled,
         )
 
     return {

@@ -1,6 +1,18 @@
 import sqlite3
+from collections import OrderedDict
+from datetime import date
 from typing import Optional
 from app.models.db import get_market_db
+
+
+def _period_key(day: str, period: str) -> str:
+    parsed = date.fromisoformat(day)
+    if period == "weekly":
+        iso_year, iso_week, _ = parsed.isocalendar()
+        return f"{iso_year}-{iso_week:02d}"
+    if period == "monthly":
+        return day[:7]
+    raise ValueError(f"unsupported aggregate period: {period}")
 
 
 class MarketStorage:
@@ -46,9 +58,17 @@ class MarketStorage:
         conn.commit()
         conn.close()
 
-    def get_daily(self, code: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> list[dict]:
+    def get_kline_data(self, code: str, start_date: Optional[str] = None, end_date: Optional[str] = None, period: str = "d") -> list[dict]:
+        table = {
+            "d": "stock_daily",
+            "w": "stock_weekly",
+            "m": "stock_monthly",
+        }.get(period)
+        if table is None:
+            raise ValueError(f"unsupported period: {period}")
+
         conn = get_market_db()
-        sql = "SELECT * FROM stock_daily WHERE code = ?"
+        sql = f"SELECT * FROM {table} WHERE code = ?"
         params: list = [code]
         if start_date:
             sql += " AND date >= ?"
@@ -60,6 +80,61 @@ class MarketStorage:
         rows = conn.execute(sql, params).fetchall()
         conn.close()
         return [dict(r) for r in rows]
+
+    def get_daily(self, code: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> list[dict]:
+        return self.get_kline_data(code, start_date, end_date, period="d")
+
+    def rebuild_aggregates(self, codes: list[str], periods: list[str] | None = None):
+        periods = periods or ["weekly", "monthly"]
+        table_map = {"weekly": "stock_weekly", "monthly": "stock_monthly"}
+        conn = get_market_db()
+        try:
+            for code in codes:
+                daily_rows = [
+                    dict(r) for r in conn.execute(
+                        "SELECT * FROM stock_daily WHERE code = ? ORDER BY date ASC",
+                        (code,),
+                    ).fetchall()
+                ]
+                valid_rows = [
+                    row for row in daily_rows
+                    if all(row.get(field) is not None for field in ("open", "high", "low", "close"))
+                ]
+                for period in periods:
+                    table = table_map[period]
+                    conn.execute(f"DELETE FROM {table} WHERE code = ?", (code,))
+                    grouped = OrderedDict()
+                    for row in valid_rows:
+                        grouped.setdefault(_period_key(row["date"], period), []).append(row)
+                    aggregates = []
+                    for group_rows in grouped.values():
+                        first = group_rows[0]
+                        last = group_rows[-1]
+                        aggregates.append({
+                            "code": first["code"],
+                            "date": last["date"],
+                            "open": first["open"],
+                            "high": max(item["high"] for item in group_rows),
+                            "low": min(item["low"] for item in group_rows),
+                            "close": last["close"],
+                            "volume": sum((item["volume"] or 0) for item in group_rows),
+                            "amount": sum((item["amount"] or 0) for item in group_rows),
+                            "turn": sum((item["turn"] or 0) for item in group_rows),
+                            "peTTM": last["peTTM"],
+                            "pbMRQ": last["pbMRQ"],
+                            "psTTM": last["psTTM"],
+                            "pcfNcfTTM": last["pcfNcfTTM"],
+                        })
+                    if aggregates:
+                        conn.executemany(
+                            f"""INSERT OR REPLACE INTO {table}
+                               (code, date, open, high, low, close, volume, amount, turn, peTTM, pbMRQ, psTTM, pcfNcfTTM)
+                               VALUES (:code, :date, :open, :high, :low, :close, :volume, :amount, :turn, :peTTM, :pbMRQ, :psTTM, :pcfNcfTTM)""",
+                            aggregates,
+                        )
+            conn.commit()
+        finally:
+            conn.close()
 
     def get_latest_date(self, code: str) -> Optional[str]:
         conn = get_market_db()

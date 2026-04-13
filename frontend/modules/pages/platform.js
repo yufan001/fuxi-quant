@@ -5,6 +5,7 @@ let chart = null;
 let currentCode = 'sh.600000';
 let currentName = '浦发银行';
 let currentData = [];
+let currentPeriod = 'd';
 
 const MA_CONFIG = [
     { period: 5, color: '#f59e0b', label: 'MA5' },
@@ -45,6 +46,11 @@ export async function render(container) {
                     <button class="btn" id="btnFavorite" title="加入自选">&#9734;</button>
                     <span class="stock-name" id="stockName">${currentName}</span>
                     <span class="stock-code" id="stockCode">${currentCode}</span>
+                    <div class="period-switch" id="periodSwitch" style="display:flex;gap:4px;">
+                        <button class="btn btn-period active" data-period="d">日</button>
+                        <button class="btn btn-period" data-period="w">周</button>
+                        <button class="btn btn-period" data-period="m">月</button>
+                    </div>
                     <span class="stock-price" id="stockPrice">--</span>
                     <span class="stock-change" id="stockChange"></span>
                     <div style="margin-left:auto;display:flex;gap:4px;" id="maLegend">
@@ -66,6 +72,7 @@ export async function render(container) {
 
     setupSearch();
     setupFavoriteButton();
+    setupPeriodSwitch();
     document.getElementById('btnAddCurrent').addEventListener('click', () => {
         addFavorite(currentCode, currentName);
     });
@@ -137,6 +144,20 @@ function bindDropdownClicks(dropdown, input) {
             input.value = '';
             dropdown.classList.remove('show');
             switchStock(code, name);
+        });
+    });
+}
+
+function setupPeriodSwitch() {
+    document.querySelectorAll('.btn-period').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const nextPeriod = btn.dataset.period;
+            if (nextPeriod === currentPeriod) return;
+            currentPeriod = nextPeriod;
+            document.querySelectorAll('.btn-period').forEach(node => {
+                node.classList.toggle('active', node.dataset.period === currentPeriod);
+            });
+            await loadStock(currentCode);
         });
     });
 }
@@ -232,7 +253,7 @@ function renderWatchlist() {
 async function loadWatchlistPrices(favs) {
     for (const f of favs) {
         try {
-            const resp = await getKline(f.code);
+            const resp = await getKline(f.code, undefined, undefined, 'd');
             const data = resp.data || [];
             if (data.length >= 2) {
                 const last = data[data.length - 1];
@@ -265,7 +286,7 @@ async function initChart() {
 
 async function loadStock(code) {
     try {
-        const resp = await getKline(code);
+        const resp = await getKline(code, undefined, undefined, currentPeriod);
         const data = resp.data || [];
         currentData = data;
 

@@ -44,10 +44,11 @@ export async function getStocks(q = '') {
     return fetchJSON(`/api/market/stocks${params}`);
 }
 
-export async function getKline(code, startDate, endDate) {
+export async function getKline(code, startDate, endDate, period = 'd') {
     const params = new URLSearchParams();
     if (startDate) params.set('start_date', startDate);
     if (endDate) params.set('end_date', endDate);
+    params.set('period', period);
     const qs = params.toString();
     return fetchJSON(`/api/market/kline/${encodeURIComponent(code)}${qs ? '?' + qs : ''}`);
 }

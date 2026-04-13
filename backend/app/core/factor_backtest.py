@@ -80,7 +80,13 @@ def _build_equity_curve(histories_by_code: dict[str, list[dict]], states: list[d
     return equity_curve
 
 
-def run_selection_backtest(histories_by_code: dict[str, list[dict]], rebalances: list[dict], initial_capital: float) -> FactorBacktestResult:
+def run_selection_backtest(
+    histories_by_code: dict[str, list[dict]],
+    rebalances: list[dict],
+    initial_capital: float,
+    progress_callback=None,
+    assert_not_cancelled=None,
+) -> FactorBacktestResult:
     cash = float(initial_capital)
     positions: dict[str, int] = {}
     executed_rebalances = []
@@ -93,7 +99,10 @@ def run_selection_backtest(histories_by_code: dict[str, list[dict]], rebalances:
             rebalances=[],
         )
 
-    for rebalance in rebalances:
+    total_rebalances = len(rebalances)
+    for index, rebalance in enumerate(rebalances, start=1):
+        if assert_not_cancelled:
+            assert_not_cancelled()
         rebalance_date = rebalance["date"]
         selected = rebalance.get("selected", [])
 
@@ -140,6 +149,8 @@ def run_selection_backtest(histories_by_code: dict[str, list[dict]], rebalances:
             }
         )
         states.append({"date": rebalance_date, "cash": cash, "positions": deepcopy(positions)})
+        if progress_callback:
+            progress_callback(20 + index / max(total_rebalances, 1) * 70, f'rebalance_{index}_of_{total_rebalances}')
 
     equity_curve = _build_equity_curve(histories_by_code, states, rebalances[0]["date"])
     final_equity = equity_curve[-1]["equity"] if equity_curve else round(cash, 2)
@@ -156,7 +167,12 @@ def run_selection_backtest(histories_by_code: dict[str, list[dict]], rebalances:
     )
 
 
-def run_factor_backtest(histories_by_code: dict[str, list[dict]], config: FactorBacktestConfig) -> FactorBacktestResult:
+def run_factor_backtest(
+    histories_by_code: dict[str, list[dict]],
+    config: FactorBacktestConfig,
+    progress_callback=None,
+    assert_not_cancelled=None,
+) -> FactorBacktestResult:
     definitions = build_builtin_definitions(config.factor_configs)
     rebalance_dates = sorted(config.rebalance_dates)
     if not rebalance_dates:
@@ -167,7 +183,10 @@ def run_factor_backtest(histories_by_code: dict[str, list[dict]], config: Factor
         )
 
     rebalances = []
-    for rebalance_date in rebalance_dates:
+    total_rebalances = len(rebalance_dates)
+    for index, rebalance_date in enumerate(rebalance_dates, start=1):
+        if assert_not_cancelled:
+            assert_not_cancelled()
         snapshot_histories = {
             code: _history_until(history, rebalance_date)
             for code, history in histories_by_code.items()
@@ -175,5 +194,13 @@ def run_factor_backtest(histories_by_code: dict[str, list[dict]], config: Factor
         raw_values = compute_factor_values(snapshot_histories, definitions)
         selected = rank_stocks(combine_factor_scores(raw_values, definitions), config.top_n)
         rebalances.append({"date": rebalance_date, "selected": selected})
+        if progress_callback:
+            progress_callback(10 + index / max(total_rebalances, 1) * 20, f'prepared_rebalance_{index}_of_{total_rebalances}')
 
-    return run_selection_backtest(histories_by_code, rebalances, config.initial_capital)
+    return run_selection_backtest(
+        histories_by_code,
+        rebalances,
+        config.initial_capital,
+        progress_callback=progress_callback,
+        assert_not_cancelled=assert_not_cancelled,
+    )
