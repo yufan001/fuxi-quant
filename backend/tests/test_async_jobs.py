@@ -65,6 +65,25 @@ class AsyncJobTests(unittest.TestCase):
         self.assertIn('X-Fuxi-Signature', captured['headers'])
         self.assertIn('X-Fuxi-Timestamp', captured['headers'])
 
+    def test_failed_job_persists_structured_result_payload(self):
+        manager = JobManager(db_factory=self.make_conn)
+
+        class StructuredFailure(Exception):
+            status = 'timeout'
+            code = 'script_timeout'
+            message = 'script timeout'
+            details = {'status': 'timeout', 'error': {'code': 'script_timeout', 'message': 'script timeout'}}
+
+        def handler(ctx):
+            raise StructuredFailure('script timeout')
+
+        manager.register('echo', handler)
+        job_id = manager.submit('echo', {'value': 42}, run_async=False)
+        result = manager.get_job_result(job_id)
+
+        self.assertEqual(result['status'], 'timeout')
+        self.assertEqual(result['error']['code'], 'script_timeout')
+
 
 if __name__ == '__main__':
     unittest.main()

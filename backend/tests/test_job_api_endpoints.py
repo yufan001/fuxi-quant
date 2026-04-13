@@ -112,6 +112,16 @@ class JobApiEndpointTests(unittest.TestCase):
         self.assertEqual(artifacts['data']['artifacts'][0]['name'], 'summary.json')
         self.assertEqual(artifact['data']['name'], 'summary.json')
 
+    def test_get_job_result_returns_structured_terminal_payload(self):
+        manager = FakeManager()
+        manager.get_job_result = lambda job_id: {'status': 'timeout', 'error': {'code': 'script_timeout', 'message': 'script timeout'}}
+
+        with patch('app.api.jobs.get_job_manager', return_value=manager):
+            result = get_job_result('job_test_1')
+
+        self.assertEqual(result['data']['status'], 'timeout')
+        self.assertEqual(result['data']['error']['code'], 'script_timeout')
+
     def test_cancel_job_endpoint_forwards_to_manager(self):
         manager = FakeManager()
         with patch('app.api.jobs.get_job_manager', return_value=manager):

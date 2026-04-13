@@ -50,6 +50,22 @@ class JobHandlerTests(unittest.TestCase):
         self.assertTrue(any(item['name'] == 'result.json' for item in context.artifacts))
         self.assertTrue(any(item['name'] == 'equity_curve.json' for item in context.artifacts))
 
+    def test_factor_backtest_job_writes_structured_script_timeout_result(self):
+        context = self.make_context({'strategy_id': 'custom_factor_script'})
+        error = Exception('script timeout')
+        error.status = 'timeout'
+        error.code = 'script_timeout'
+        error.message = 'script timeout'
+        error.details = {'status': 'timeout', 'error': {'code': 'script_timeout', 'message': 'script timeout'}}
+
+        with patch('app.core.job_handlers.MarketStorage', return_value=MagicMock()), patch('app.core.job_handlers.run_factor_job', side_effect=error):
+            with self.assertRaises(Exception):
+                factor_backtest_job(context)
+
+        self.assertTrue(any(item['name'] == 'result.json' for item in context.artifacts))
+        self.assertEqual(context.summary['status'], 'timeout')
+        self.assertEqual(context.summary['error_code'], 'script_timeout')
+
     def test_data_import_db_job_copies_source_database(self):
         src = tempfile.NamedTemporaryFile(delete=False)
         src.write(b'test-db')

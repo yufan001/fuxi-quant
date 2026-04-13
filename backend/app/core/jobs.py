@@ -243,11 +243,18 @@ class JobManager:
             conn.close()
             self._deliver_callback(job_id, job_type, callback, result=result, summary=context.summary, artifacts=context.artifacts)
         except JobCancelledError:
+            cancelled_payload = {
+                'status': 'cancelled',
+                'error': {'code': 'cancelled', 'message': 'job cancelled'},
+                'summary': context.summary,
+                'artifacts': context.artifacts,
+            }
             conn = self.db_factory()
             conn.execute(
-                'UPDATE jobs SET status = ?, progress_json = ?, logs_json = ?, summary_json = ?, artifact_json = ?, finished_at = ?, updated_at = ? WHERE id = ?',
+                'UPDATE jobs SET status = ?, result_json = ?, progress_json = ?, logs_json = ?, summary_json = ?, artifact_json = ?, finished_at = ?, updated_at = ? WHERE id = ?',
                 (
                     'cancelled',
+                    json.dumps(cancelled_payload, ensure_ascii=False),
                     json.dumps({'percent': 100, 'message': 'cancelled'}, ensure_ascii=False),
                     json.dumps(context.logs, ensure_ascii=False),
                     json.dumps(context.summary, ensure_ascii=False),
@@ -259,14 +266,25 @@ class JobManager:
             )
             conn.commit()
             conn.close()
-            self._deliver_callback(job_id, job_type, callback, error='cancelled', summary=context.summary, artifacts=context.artifacts, status='cancelled')
+            self._deliver_callback(job_id, job_type, callback, result=cancelled_payload, error='cancelled', summary=context.summary, artifacts=context.artifacts, status='cancelled')
         except Exception as exc:
+            details = getattr(exc, 'details', None)
+            failed_payload = details if isinstance(details, dict) else {
+                'status': getattr(exc, 'status', 'failed'),
+                'error': {
+                    'code': getattr(exc, 'code', 'job_failed'),
+                    'message': getattr(exc, 'message', str(exc)),
+                },
+                'summary': context.summary,
+                'artifacts': context.artifacts,
+            }
             conn = self.db_factory()
             conn.execute(
-                'UPDATE jobs SET status = ?, error_text = ?, progress_json = ?, logs_json = ?, summary_json = ?, artifact_json = ?, finished_at = ?, updated_at = ? WHERE id = ?',
+                'UPDATE jobs SET status = ?, result_json = ?, error_text = ?, progress_json = ?, logs_json = ?, summary_json = ?, artifact_json = ?, finished_at = ?, updated_at = ? WHERE id = ?',
                 (
                     'failed',
-                    str(exc),
+                    json.dumps(failed_payload, ensure_ascii=False),
+                    failed_payload['error']['message'],
                     json.dumps({'percent': 100, 'message': 'failed'}, ensure_ascii=False),
                     json.dumps(context.logs, ensure_ascii=False),
                     json.dumps(context.summary, ensure_ascii=False),
@@ -278,7 +296,7 @@ class JobManager:
             )
             conn.commit()
             conn.close()
-            self._deliver_callback(job_id, job_type, callback, error=str(exc), summary=context.summary, artifacts=context.artifacts)
+            self._deliver_callback(job_id, job_type, callback, result=failed_payload, error=failed_payload['error']['message'], summary=context.summary, artifacts=context.artifacts)
 
     def _deliver_callback(self, job_id: str, job_type: str, callback: dict | None, result: dict | None = None, error: str | None = None, summary: dict | None = None, artifacts: list[dict] | None = None, status: str | None = None):
         if not callback or not callback.get('url'):

@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.core.config import MARKET_DB_PATH
-from app.core.factor_runner import run_factor_job
+from app.core.factor_runner import FactorScriptExecutionError, run_factor_job
 from app.data.downloader import DataDownloader
 from app.data.storage import MarketStorage
 
@@ -14,13 +14,25 @@ def factor_backtest_job(context):
     context.raise_if_cancelled()
     storage = MarketStorage()
     request = SimpleNamespace(**context.payload)
-    result = run_factor_job(
-        storage,
-        request,
-        progress_callback=context.set_progress,
-        log_callback=context.log,
-        assert_not_cancelled=context.raise_if_cancelled,
-    )
+    try:
+        result = run_factor_job(
+            storage,
+            request,
+            progress_callback=context.set_progress,
+            log_callback=context.log,
+            assert_not_cancelled=context.raise_if_cancelled,
+        )
+    except Exception as exc:
+        if isinstance(exc, FactorScriptExecutionError) or getattr(exc, 'code', None) or getattr(exc, 'status', None):
+            payload = {
+                'status': getattr(exc, 'status', 'failed'),
+                'error': {'code': getattr(exc, 'code', 'job_failed'), 'message': getattr(exc, 'message', str(exc))},
+                'details': getattr(exc, 'details', {}),
+            }
+            context.set_summary({'status': payload['status'], 'error_code': payload['error']['code']})
+            context.write_json_artifact('result.json', payload)
+            context.write_text_artifact('logs.txt', '\n'.join(context.logs))
+        raise
     context.raise_if_cancelled()
     summary = {
         'final_equity': result.get('metrics', {}).get('final_equity'),

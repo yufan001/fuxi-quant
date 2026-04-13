@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.core.engine import BacktestEngine
-from app.core.factor_runner import run_factor_job
+from app.core.factor_runner import FactorScriptExecutionError, run_factor_job
 from app.data.storage import MarketStorage
 from app.models.db import get_market_db
 
@@ -143,15 +143,27 @@ def run_factor_backtest_job(request: FactorBacktestRequest):
     try:
         storage = MarketStorage()
         result = run_factor_job(storage, resolved_request)
-        payload = {"run_id": run_id, **result}
+        payload = {"run_id": run_id, "status": "success", **result}
         conn.execute(
             "UPDATE factor_backtest_runs SET status = ?, result_json = ?, updated_at = datetime('now') WHERE id = ?",
             ("success", json.dumps(payload, ensure_ascii=False), run_id),
         )
         conn.commit()
         return {"data": payload}
+    except FactorScriptExecutionError as exc:
+        error_payload = {
+            "run_id": run_id,
+            "status": exc.status,
+            "error": {"code": exc.code, "message": exc.message},
+        }
+        conn.execute(
+            "UPDATE factor_backtest_runs SET status = ?, result_json = ?, updated_at = datetime('now') WHERE id = ?",
+            ("failed", json.dumps(error_payload, ensure_ascii=False), run_id),
+        )
+        conn.commit()
+        return {"error": exc.message, "data": error_payload}
     except Exception as exc:
-        error_payload = {"run_id": run_id, "error": str(exc)}
+        error_payload = {"run_id": run_id, "status": "failed", "error": {"code": "job_failed", "message": str(exc)}}
         conn.execute(
             "UPDATE factor_backtest_runs SET status = ?, result_json = ?, updated_at = datetime('now') WHERE id = ?",
             ("failed", json.dumps(error_payload, ensure_ascii=False), run_id),
