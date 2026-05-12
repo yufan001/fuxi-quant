@@ -124,5 +124,122 @@ def init_market_db():
 
 def init_biz_db():
     conn = get_biz_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS short_term_candidates (
+            code TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            name TEXT,
+            sector TEXT,
+            candidate_type TEXT,
+            limit_hit_count INTEGER,
+            limit_open_count INTEGER,
+            visible_open_seconds REAL,
+            closed_at_limit INTEGER,
+            first_limit_time TEXT,
+            last_limit_time TEXT,
+            score_prev_day REAL,
+            notes TEXT,
+            data_quality TEXT,
+            PRIMARY KEY (code, trade_date)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS short_term_auction_snapshots (
+            code TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            name TEXT,
+            sector TEXT,
+            auction_price REAL,
+            prev_close REAL,
+            auction_gap_pct REAL,
+            auction_volume REAL,
+            auction_amount REAL,
+            auction_volume_vs_prev_day_pct REAL,
+            limit_buy_rank INTEGER,
+            limit_buy_amount REAL,
+            data_source TEXT,
+            data_quality TEXT,
+            PRIMARY KEY (code, trade_date, captured_at)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS short_term_sector_snapshots (
+            sector_name TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            sector_rank INTEGER,
+            sector_limit_up_count INTEGER,
+            sector_avg_gap_pct REAL,
+            sector_auction_amount REAL,
+            sector_score REAL,
+            data_source TEXT,
+            data_quality TEXT,
+            PRIMARY KEY (sector_name, trade_date, captured_at)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS short_term_open_snapshots (
+            code TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            latest_price REAL,
+            auction_price REAL,
+            prev_close REAL,
+            vwap_1m REAL,
+            volume_1m REAL,
+            amount_1m REAL,
+            hold_above_auction INTEGER,
+            hold_above_vwap INTEGER,
+            pullback_pct REAL,
+            large_sell_pressure_flag INTEGER,
+            data_source TEXT,
+            data_quality TEXT,
+            PRIMARY KEY (code, trade_date, captured_at)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS short_term_scores (
+            code TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            total_score REAL,
+            score_breakdown_json TEXT,
+            reasons_json TEXT,
+            data_quality TEXT,
+            PRIMARY KEY (code, trade_date, phase)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS short_term_alerts (
+            id TEXT PRIMARY KEY,
+            created_at TEXT,
+            symbol TEXT,
+            trade_date TEXT,
+            alert_type TEXT,
+            score REAL,
+            message TEXT,
+            payload_json TEXT,
+            acknowledged INTEGER DEFAULT 0
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS short_term_ocr_rows (
+            id TEXT PRIMARY KEY,
+            created_at TEXT,
+            source_screenshot_path TEXT,
+            screen_name TEXT,
+            row_index INTEGER,
+            raw_text TEXT,
+            parsed_json TEXT,
+            ocr_confidence REAL,
+            data_quality TEXT,
+            needs_review INTEGER DEFAULT 0
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_short_term_candidates_date ON short_term_candidates(trade_date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_short_term_auction_date ON short_term_auction_snapshots(trade_date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_short_term_open_date ON short_term_open_snapshots(trade_date)")
     conn.commit()
     conn.close()

@@ -6,6 +6,13 @@ from app.core.config import MARKET_DB_PATH
 from app.core.factor_runner import FactorScriptExecutionError, run_factor_job
 from app.data.downloader import DataDownloader
 from app.data.storage import MarketStorage
+from app.short_term.jobs import (
+    short_term_backtest_job,
+    short_term_build_candidates_job,
+    short_term_import_csv_job,
+    short_term_monitor_open_job,
+    short_term_score_auction_job,
+)
 
 
 def factor_backtest_job(context):
@@ -129,3 +136,8 @@ def register_job_handlers(manager):
     manager.register('factor_backtest', factor_backtest_job)
     manager.register('data_import_db', data_import_db_job)
     manager.register('data_update', data_update_job)
+    manager.register('short_term_import_csv', short_term_import_csv_job)
+    manager.register('short_term_build_candidates', short_term_build_candidates_job)
+    manager.register('short_term_score_auction', short_term_score_auction_job)
+    manager.register('short_term_monitor_open', short_term_monitor_open_job)
+    manager.register('short_term_backtest', short_term_backtest_job)

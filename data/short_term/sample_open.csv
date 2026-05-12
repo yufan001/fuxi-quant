@@ -1,0 +1,2 @@
+code,trade_date,captured_at,latest_price,auction_price,prev_close,vwap_1m,volume_1m,amount_1m,hold_above_auction,hold_above_vwap,pullback_pct,large_sell_pressure_flag
+sh.600001,2026-05-12,2026-05-12T09:31:00,10.55,10.35,10.00,10.48,1200000,32000000,1,1,0.8,0

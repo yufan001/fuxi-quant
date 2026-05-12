@@ -48,14 +48,21 @@ class DuckDbMarketQuery:
             filters.append("date <= ?")
             params.append(end_date)
 
-        sql = f"""
-            SELECT {', '.join(selected_columns)}
-            FROM read_parquet([{files_sql}])
-            WHERE {' AND '.join(filters)}
-            ORDER BY code ASC, date ASC
-        """
-
         with duckdb.connect() as conn:
+            available_columns = {
+                row[0]
+                for row in conn.execute(f"DESCRIBE SELECT * FROM read_parquet([{files_sql}])").fetchall()
+            }
+            select_sql = ", ".join(
+                column if column in available_columns else f"NULL AS {column}"
+                for column in selected_columns
+            )
+            sql = f"""
+                SELECT {select_sql}
+                FROM read_parquet([{files_sql}])
+                WHERE {' AND '.join(filters)}
+                ORDER BY code ASC, date ASC
+            """
             return conn.execute(sql, params).fetchdf()
 
     def get_histories(self, codes: list[str], start_date: str | None = None, end_date: str | None = None) -> dict[str, list[dict]]:

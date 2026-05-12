@@ -1,0 +1,7 @@
+scoring:
+  preopen_observe_score: 65
+  open_strength_score: 75
+auction:
+  min_gap_pct: 1.0
+  max_gap_pct: 8.5
+  min_amount: 10000000

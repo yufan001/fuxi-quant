@@ -1,0 +1,2 @@
+code,trade_date,captured_at,name,sector,auction_price,prev_close,auction_gap_pct,auction_volume,auction_amount,auction_volume_vs_prev_day_pct,limit_buy_rank,limit_buy_amount
+sh.600001,2026-05-12,2026-05-12T09:25:00,样例一,机器人,10.35,10.00,3.5,1000000,28000000,2.0,8,50000000

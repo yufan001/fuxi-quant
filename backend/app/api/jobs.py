@@ -39,6 +39,27 @@ class DataUpdateJobRequest(BaseModel):
     callback_secret: Optional[str] = None
 
 
+class ShortTermImportCsvRequest(BaseModel):
+    data_type: str
+    source_path: str
+    callback_url: Optional[str] = None
+    callback_secret: Optional[str] = None
+
+
+class ShortTermDateJobRequest(BaseModel):
+    trade_date: str
+    candidate_date: Optional[str] = None
+    callback_url: Optional[str] = None
+    callback_secret: Optional[str] = None
+
+
+class ShortTermBacktestRequest(BaseModel):
+    start_date: str
+    end_date: str
+    callback_url: Optional[str] = None
+    callback_secret: Optional[str] = None
+
+
 @router.post('/backtest/factor')
 def submit_factor_job(request: FactorJobRequest):
     manager = get_job_manager()
@@ -69,6 +90,52 @@ def submit_data_update_job(request: DataUpdateJobRequest):
     if request.callback_url:
         callback = {'url': request.callback_url, 'secret': request.callback_secret}
     job_id = manager.submit('data_update', payload, callback=callback)
+    return {'data': {'job_id': job_id, 'status': 'queued'}}
+
+
+def _callback_from_request(request):
+    if request.callback_url:
+        return {'url': request.callback_url, 'secret': request.callback_secret}
+    return None
+
+
+@router.post('/short-term/import-csv')
+def submit_short_term_import_csv_job(request: ShortTermImportCsvRequest):
+    manager = get_job_manager()
+    payload = request.model_dump(exclude={'callback_url', 'callback_secret'})
+    job_id = manager.submit('short_term_import_csv', payload, callback=_callback_from_request(request))
+    return {'data': {'job_id': job_id, 'status': 'queued'}}
+
+
+@router.post('/short-term/build-candidates')
+def submit_short_term_build_candidates_job(request: ShortTermDateJobRequest):
+    manager = get_job_manager()
+    payload = request.model_dump(exclude={'callback_url', 'callback_secret'})
+    job_id = manager.submit('short_term_build_candidates', payload, callback=_callback_from_request(request))
+    return {'data': {'job_id': job_id, 'status': 'queued'}}
+
+
+@router.post('/short-term/score-auction')
+def submit_short_term_score_auction_job(request: ShortTermDateJobRequest):
+    manager = get_job_manager()
+    payload = request.model_dump(exclude={'callback_url', 'callback_secret'})
+    job_id = manager.submit('short_term_score_auction', payload, callback=_callback_from_request(request))
+    return {'data': {'job_id': job_id, 'status': 'queued'}}
+
+
+@router.post('/short-term/monitor-open')
+def submit_short_term_monitor_open_job(request: ShortTermDateJobRequest):
+    manager = get_job_manager()
+    payload = request.model_dump(exclude={'callback_url', 'callback_secret'})
+    job_id = manager.submit('short_term_monitor_open', payload, callback=_callback_from_request(request))
+    return {'data': {'job_id': job_id, 'status': 'queued'}}
+
+
+@router.post('/short-term/backtest')
+def submit_short_term_backtest_job(request: ShortTermBacktestRequest):
+    manager = get_job_manager()
+    payload = request.model_dump(exclude={'callback_url', 'callback_secret'})
+    job_id = manager.submit('short_term_backtest', payload, callback=_callback_from_request(request))
     return {'data': {'job_id': job_id, 'status': 'queued'}}
 
 

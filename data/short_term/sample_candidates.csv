@@ -1,0 +1,3 @@
+code,trade_date,name,sector,touched_limit,limit_hit_count,limit_open_count,visible_open_seconds,closed_at_limit,is_st,is_suspended
+sh.600001,2026-05-11,样例一,机器人,1,2,3,90,1,0,0
+sz.000001,2026-05-11,样例二,金融,1,1,1,0,0,0,0
