@@ -160,7 +160,7 @@ def _normalize_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _to_utc_datetime_ns(values: Any) -> pd.Series:
     dt = pd.to_datetime(values, utc=True)
-    return pd.to_datetime(dt.astype("int64"), unit="ns", utc=True)
+    return dt.astype("datetime64[ns, UTC]")
 
 
 def _gate_tradfi_klines_to_frame(payload: dict[str, Any]) -> pd.DataFrame:
