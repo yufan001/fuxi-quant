@@ -10,6 +10,7 @@ import urllib.parse
 import urllib.request
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -21,6 +22,7 @@ DEFAULT_SPOT_SYMBOL = "XAUUSD20"
 DEFAULT_FUTURES_SYMBOL = "GC=F"
 DEFAULT_PANIC_VOL_SYMBOL = "^GVZ"
 DEFAULT_SPOT_TICK_DB_PATH = "/root/.gate/gate_tradfi_rm_xauusd_quotes.sqlite"
+DEFAULT_GC_KLINE_CACHE_DIR = "/var/lib/fuxi/xau/gc_klines"
 SUPPORTED_INTERVALS = {"1m": 60, "5m": 300, "1h": 3600}
 CHART_INTERVALS = {"1m", "5m"}
 SNAPSHOT_CACHE_TTL_SECONDS = 300.0
@@ -83,6 +85,54 @@ def _fetch_json(url: str, *, timeout: float = 30.0) -> dict[str, Any]:
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _slug_symbol(symbol: str) -> str:
+    return "".join(ch.lower() if ch.isalnum() else "_" for ch in symbol).strip("_") or "symbol"
+
+
+def _gc_cache_dir() -> Path:
+    return Path(os.getenv("FUXI_GC_KLINE_CACHE_DIR", DEFAULT_GC_KLINE_CACHE_DIR))
+
+
+def _gc_cache_file(symbol: str, interval: str, range_days: int) -> Path:
+    return _gc_cache_dir() / f"{_slug_symbol(symbol)}_{interval}_{int(range_days)}d.json"
+
+
+def _gc_cache_candidates(symbol: str, interval: str, range_days: int) -> list[Path]:
+    cache_dir = _gc_cache_dir()
+    exact = _gc_cache_file(symbol, interval, range_days)
+    candidates: list[Path] = [exact]
+    if cache_dir.exists():
+        prefix = f"{_slug_symbol(symbol)}_{interval}_"
+        others = [
+            path
+            for path in cache_dir.glob(f"{prefix}*d.json")
+            if path != exact
+        ]
+
+        def score(path: Path) -> tuple[int, float]:
+            suffix = path.stem.removeprefix(prefix).removesuffix("d")
+            try:
+                days = int(suffix)
+            except ValueError:
+                days = 0
+            enough_window = 0 if days >= range_days else 1
+            return (enough_window, -path.stat().st_mtime)
+
+        candidates.extend(sorted(others, key=score))
+    return candidates
+
+
+def _write_gc_payload_cache(symbol: str, interval: str, range_days: int, payload: dict[str, Any]) -> None:
+    path = _gc_cache_file(symbol, interval, range_days)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        tmp_path.replace(path)
+    except OSError:
+        return
 
 
 def _row_value(row: dict[str, Any], *keys: str, default: float | None = None) -> float | None:
@@ -274,15 +324,31 @@ def fetch_yahoo_gc_klines(
 
     # Yahoo's chart API accepts short intraday ranges as "1d", "5d", etc.
     range_days = min(max(math.ceil(float(days)), 1), 7 if interval == "1m" else 60)
+    payload = fetch_yahoo_gc_payload(symbol, interval=interval, range_days=range_days)
+    frame = parse_yahoo_gc_payload(symbol, payload)
+    frame.attrs["source"] = "Yahoo Finance chart GC=F"
+    _write_gc_payload_cache(symbol, interval, range_days, payload)
+    return frame
+
+
+def fetch_yahoo_gc_payload(
+    symbol: str = DEFAULT_FUTURES_SYMBOL,
+    *,
+    interval: str = "5m",
+    range_days: int = 3,
+) -> dict[str, Any]:
     query = urllib.parse.urlencode(
         {
-            "range": f"{range_days}d",
+            "range": f"{int(range_days)}d",
             "interval": interval,
             "includePrePost": "true",
         }
     )
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol, safe='')}?{query}"
-    payload = _fetch_json(url)
+    return _fetch_json(url)
+
+
+def parse_yahoo_gc_payload(symbol: str, payload: dict[str, Any]) -> pd.DataFrame:
     error = (payload.get("chart") or {}).get("error")
     if error:
         raise RuntimeError(f"Yahoo chart error for {symbol}: {error}")
@@ -308,6 +374,55 @@ def fetch_yahoo_gc_klines(
     if frame.empty:
         raise RuntimeError(f"Yahoo returned no non-zero volume bars for {symbol}")
     return frame.reset_index(drop=True)
+
+
+def fetch_cached_gc_klines(
+    symbol: str = DEFAULT_FUTURES_SYMBOL,
+    *,
+    interval: str = "5m",
+    days: float = 3.0,
+    live_error: str | None = None,
+) -> pd.DataFrame:
+    range_days = min(max(math.ceil(float(days)), 1), 7 if interval == "1m" else 60)
+    errors: list[str] = []
+    for path in _gc_cache_candidates(symbol, interval, range_days):
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            frame = parse_yahoo_gc_payload(symbol, payload)
+        except Exception as exc:
+            errors.append(f"{path.name}: {exc}")
+            continue
+
+        if not frame.empty:
+            latest = pd.Timestamp(frame["date"].max())
+            cutoff = latest - pd.Timedelta(days=float(days))
+            frame = frame[frame["date"] >= cutoff].reset_index(drop=True)
+        if frame.empty:
+            errors.append(f"{path.name}: no rows in requested window")
+            continue
+
+        frame.attrs["source"] = "Yahoo Finance chart GC=F cached"
+        frame.attrs["source_error"] = live_error
+        frame.attrs["cache_path"] = str(path)
+        frame.attrs["cache_mtime"] = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+        return frame
+
+    detail = "; ".join(errors) if errors else "no cache files"
+    raise RuntimeError(f"Yahoo GC live unavailable and cached GC data unavailable: {live_error}; {detail}")
+
+
+def fetch_gc_klines_with_cache(
+    symbol: str = DEFAULT_FUTURES_SYMBOL,
+    *,
+    interval: str = "5m",
+    days: float = 3.0,
+) -> pd.DataFrame:
+    try:
+        return fetch_yahoo_gc_klines(symbol, interval=interval, days=days)
+    except Exception as exc:
+        return fetch_cached_gc_klines(symbol, interval=interval, days=days, live_error=str(exc))
 
 
 def fetch_yahoo_daily_index(
@@ -589,8 +704,17 @@ def build_gc_volume_profile_snapshot(
     xau_frame = fetch_spot_xau_klines(spot_symbol, interval=interval, days=days)
     current_price = float(xau_frame["close"].iloc[-1])
     futures_error: str | None = None
+    futures_source = "Yahoo Finance chart GC=F"
+    futures_cache: dict[str, Any] | None = None
     try:
-        gc_frame = fetch_yahoo_gc_klines(futures_symbol, interval=interval, days=days)
+        gc_frame = fetch_gc_klines_with_cache(futures_symbol, interval=interval, days=days)
+        futures_source = gc_frame.attrs.get("source", futures_source)
+        futures_error = gc_frame.attrs.get("source_error")
+        if gc_frame.attrs.get("cache_path"):
+            futures_cache = {
+                "path": gc_frame.attrs.get("cache_path"),
+                "mtime": gc_frame.attrs.get("cache_mtime"),
+            }
         profile, mapping = build_mapped_volume_profile(
             gc_frame,
             xau_frame,
@@ -652,10 +776,11 @@ def build_gc_volume_profile_snapshot(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": {
             "spot": xau_frame.attrs.get("source", "Gate TradFi klines"),
-            "futures": "Yahoo Finance chart GC=F",
+            "futures": futures_source,
             "volume_owner": "COMEX GC futures",
             "spot_fallback": xau_frame.attrs.get("source_error"),
             "futures_error": futures_error,
+            "futures_cache": futures_cache,
         },
         "window": mapping,
         "settings": {
