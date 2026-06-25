@@ -158,6 +158,11 @@ def _normalize_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.reset_index(drop=True)
 
 
+def _to_utc_datetime_ns(values: Any) -> pd.Series:
+    dt = pd.to_datetime(values, utc=True)
+    return pd.to_datetime(dt.astype("int64"), unit="ns", utc=True)
+
+
 def _gate_tradfi_klines_to_frame(payload: dict[str, Any]) -> pd.DataFrame:
     rows = ((payload.get("data") or {}).get("list") or []) if isinstance(payload, dict) else []
     frame = pd.DataFrame(
@@ -531,6 +536,8 @@ def _aligned_gc_xau(gc_frame: pd.DataFrame, xau_frame: pd.DataFrame, interval: s
     tolerance = pd.Timedelta(seconds=SUPPORTED_INTERVALS[interval])
     left = gc_frame.sort_values("date").copy()
     right = xau_frame[["date", "close"]].sort_values("date").rename(columns={"close": "xau_close"})
+    left["date"] = _to_utc_datetime_ns(left["date"])
+    right["date"] = _to_utc_datetime_ns(right["date"])
     aligned = pd.merge_asof(left, right, on="date", direction="nearest", tolerance=tolerance)
     aligned = aligned.dropna(subset=["xau_close", "close", "volume"])
     if aligned.empty:
