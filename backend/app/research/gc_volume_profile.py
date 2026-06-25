@@ -587,47 +587,27 @@ def build_gc_volume_profile_snapshot(
         raise ValueError(f"unsupported interval: {interval}")
 
     xau_frame = fetch_spot_xau_klines(spot_symbol, interval=interval, days=days)
-    gc_frame = fetch_yahoo_gc_klines(futures_symbol, interval=interval, days=days)
-    profile, mapping = build_mapped_volume_profile(
-        gc_frame,
-        xau_frame,
-        interval=interval,
-        lookback_bars=lookback_bars,
-        price_step=price_step,
-        mapping_method=mapping_method,
-    )
     current_price = float(xau_frame["close"].iloc[-1])
-    zones = detect_profile_zones(
-        profile,
-        price_step=price_step,
-        value_area_pct=value_area_pct,
-        max_zones=max_zones,
-        current_price=current_price,
-    )
-    poc_row = profile.sort_values("volume", ascending=False).iloc[0]
-
-    return {
-        "spot_symbol": spot_symbol,
-        "futures_symbol": futures_symbol,
-        "interval": interval,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source": {
-            "spot": xau_frame.attrs.get("source", "Gate TradFi klines"),
-            "futures": "Yahoo Finance chart GC=F",
-            "volume_owner": "COMEX GC futures",
-            "spot_fallback": xau_frame.attrs.get("source_error"),
-        },
-        "window": mapping,
-        "settings": {
-            "days": float(days),
-            "lookback_bars": int(lookback_bars),
-            "price_step": float(price_step),
-            "value_area_pct": float(value_area_pct),
-            "max_zones": int(max_zones),
-        },
-        "last_price": current_price,
-        "candles": _frame_to_records(xau_frame),
-        "profile": {
+    futures_error: str | None = None
+    try:
+        gc_frame = fetch_yahoo_gc_klines(futures_symbol, interval=interval, days=days)
+        profile, mapping = build_mapped_volume_profile(
+            gc_frame,
+            xau_frame,
+            interval=interval,
+            lookback_bars=lookback_bars,
+            price_step=price_step,
+            mapping_method=mapping_method,
+        )
+        zones = detect_profile_zones(
+            profile,
+            price_step=price_step,
+            value_area_pct=value_area_pct,
+            max_zones=max_zones,
+            current_price=current_price,
+        )
+        poc_row = profile.sort_values("volume", ascending=False).iloc[0]
+        profile_payload = {
             "poc": float(poc_row["price"]),
             "total_volume": float(profile["volume"].sum()),
             "bucket_count": int(len(profile)),
@@ -641,7 +621,53 @@ def build_gc_volume_profile_snapshot(
                 }
                 for row in profile.sort_values("price").to_dict("records")
             ],
+        }
+    except Exception as exc:
+        futures_error = str(exc)
+        zones = []
+        mapping = {
+            "aligned_rows": 0,
+            "gc_rows": 0,
+            "xau_rows": int(len(xau_frame)),
+            "start": pd.Timestamp(xau_frame["date"].min()).isoformat(),
+            "end": pd.Timestamp(xau_frame["date"].max()).isoformat(),
+            "median_basis": None,
+            "mean_basis": None,
+            "median_ratio": None,
+            "mapping_method": mapping_method,
+            "error": futures_error,
+        }
+        profile_payload = {
+            "poc": None,
+            "total_volume": 0.0,
+            "bucket_count": 0,
+            "buckets": [],
+            "error": futures_error,
+        }
+
+    return {
+        "spot_symbol": spot_symbol,
+        "futures_symbol": futures_symbol,
+        "interval": interval,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source": {
+            "spot": xau_frame.attrs.get("source", "Gate TradFi klines"),
+            "futures": "Yahoo Finance chart GC=F",
+            "volume_owner": "COMEX GC futures",
+            "spot_fallback": xau_frame.attrs.get("source_error"),
+            "futures_error": futures_error,
         },
+        "window": mapping,
+        "settings": {
+            "days": float(days),
+            "lookback_bars": int(lookback_bars),
+            "price_step": float(price_step),
+            "value_area_pct": float(value_area_pct),
+            "max_zones": int(max_zones),
+        },
+        "last_price": current_price,
+        "candles": _frame_to_records(xau_frame),
+        "profile": profile_payload,
         "zones": zones,
     }
 
