@@ -1,3 +1,4 @@
+import os
 import threading
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
@@ -49,12 +50,13 @@ def create_app() -> FastAPI:
     def startup():
         init_market_db()
         init_biz_db()
-        from app.core.scheduler import init_scheduler
-        from app.core.job_handlers import register_job_handlers
-        from app.core.jobs import get_job_manager
+        if os.getenv("FUXI_ENABLE_BACKGROUND_JOBS", "0") == "1":
+            from app.core.scheduler import init_scheduler
+            from app.core.job_handlers import register_job_handlers
+            from app.core.jobs import get_job_manager
 
-        register_job_handlers(get_job_manager())
-        init_scheduler()
+            register_job_handlers(get_job_manager())
+            init_scheduler()
 
     return app
 

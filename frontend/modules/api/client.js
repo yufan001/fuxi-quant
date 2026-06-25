@@ -53,6 +53,19 @@ export async function getKline(code, startDate, endDate, period = 'd') {
     return fetchJSON(`/api/market/kline/${encodeURIComponent(code)}${qs ? '?' + qs : ''}`);
 }
 
+export async function getXauChart(options = {}) {
+    const params = new URLSearchParams();
+    if (options.interval) params.set('interval', options.interval);
+    if (options.days) params.set('days', String(options.days));
+    if (options.trendDays) params.set('trend_days', String(options.trendDays));
+    if (options.lookbackBars) params.set('lookback_bars', String(options.lookbackBars));
+    if (options.priceStep) params.set('price_step', String(options.priceStep));
+    if (options.valueAreaPct) params.set('value_area_pct', String(options.valueAreaPct));
+    if (options.forceRefresh) params.set('force_refresh', 'true');
+    const qs = params.toString();
+    return fetchJSON(`/api/market/xau/chart${qs ? '?' + qs : ''}`);
+}
+
 export async function getDataStatus() {
     return fetchJSON('/api/market/status');
 }

@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -11,6 +12,10 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.main import create_app
+import app.core.scheduler  # noqa: F401
+
+
+FAKE_JOB_HANDLERS = SimpleNamespace(register_job_handlers=lambda manager: None)
 
 
 class MarketPeriodApiTests(unittest.TestCase):
@@ -56,7 +61,7 @@ class MarketPeriodApiTests(unittest.TestCase):
              patch("app.models.db.init_market_db", lambda: None), \
              patch("app.models.db.init_biz_db", lambda: None), \
              patch("app.core.scheduler.init_scheduler", lambda: None), \
-             patch("app.core.job_handlers.register_job_handlers", lambda manager: None):
+             patch.dict(sys.modules, {"app.core.job_handlers": FAKE_JOB_HANDLERS}):
             with TestClient(create_app()) as client:
                 response = client.get("/api/market/kline/AAA?period=w")
 
@@ -67,12 +72,34 @@ class MarketPeriodApiTests(unittest.TestCase):
         with patch("app.models.db.init_market_db", lambda: None), \
              patch("app.models.db.init_biz_db", lambda: None), \
              patch("app.core.scheduler.init_scheduler", lambda: None), \
-             patch("app.core.job_handlers.register_job_handlers", lambda manager: None):
+             patch.dict(sys.modules, {"app.core.job_handlers": FAKE_JOB_HANDLERS}):
             with TestClient(create_app(), raise_server_exceptions=False) as client:
                 response = client.get("/api/market/kline/AAA?period=q")
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "unsupported period: q")
+
+    def test_xau_chart_endpoint_returns_dynamic_snapshot(self):
+        snapshot = {
+            "spot_symbol": "XAUUSD20",
+            "futures_symbol": "GC=F",
+            "interval": "1m",
+            "candles": [{"time": 1, "open": 1, "high": 2, "low": 1, "close": 2, "volume": 1}],
+            "zones": [{"rank": 1, "lower": 1.0, "upper": 2.0}],
+            "trend_120m": {"visible": True, "direction": "up"},
+        }
+        with patch("app.models.db.init_market_db", lambda: None), \
+             patch("app.models.db.init_biz_db", lambda: None), \
+             patch("app.core.scheduler.init_scheduler", lambda: None), \
+             patch.dict(sys.modules, {"app.core.job_handlers": FAKE_JOB_HANDLERS}), \
+             patch("app.api.market.build_xau_chart_snapshot", return_value=snapshot) as build_snapshot:
+            with TestClient(create_app()) as client:
+                response = client.get("/api/market/xau/chart?interval=1m&lookback_bars=120")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["interval"], "1m")
+        self.assertEqual(response.json()["data"]["trend_120m"]["direction"], "up")
+        build_snapshot.assert_called_once()
 
 
 if __name__ == "__main__":
